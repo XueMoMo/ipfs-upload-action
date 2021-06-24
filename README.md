@@ -17,19 +17,31 @@ Upload your website or content to [Crust's public IPFS gateway](https://crustweb
 
 *Optional*, *crustwebsites.net* gateway secret key.
 
+### `ipns-key`
+
+> ipfs key gen <ipns-key>:
+> 
+
+*Optional*, default ''
+
 ## Outputs
 
 ### `hash`
 
 **string**, Uploaded IPFS cid(CIDv0) hash value.
 
+### `ipns`
+
+**string**, Ipns for latest cid
+
 ## Example usage
 
 ```yaml
-uses: crustio/ipfs-upload-action@1.0.2
+uses: XueMoMo/ipfs-upload-action@v1
 with:
-  path: './build'
+  path: 'build'
   crust-secret-key: ${{ secrets.CRUST_SECRET_KEY }}
+  ipns-key: 'ipns-for-docs'
 ```
 
 ## Contribution
