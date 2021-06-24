@@ -38,14 +38,18 @@ async function main() {
 
     // 4. Publish to IPNS
     const ipnsKey = core.getInput('ipns-key')
+    console.info('ipns-key', ipnsKey)
     if(cid && ipnsKey){
         const keys = await ipfs.key.list()
+        console.info('keys:',keys)
         if(!keys.find(item => item.name === ipnsKey)){
-            await ipfs.key.gen(ipnsKey)
+            const k = await ipfs.key.gen(ipnsKey)
+            console.info('k:',k)
         }
         const res = await ipfs.name.publish(`/ipfs/${cid}`, {
             key: ipnsKey
         })
+        console.info('res:', res)
         core.setOutput('ipns', res.name)
     }
 }
