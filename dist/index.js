@@ -28,7 +28,7 @@ async function main() {
     }
 
     // 3. Create ipfs http client
-    const ipfs = IpfsHttpClient({
+    const ipfs = IpfsHttpClient.create({
         url: ipfsGateway,
         headers: {
             authorization: 'Basic ' + crustSecretKey
@@ -41,6 +41,23 @@ async function main() {
         core.setOutput('hash', cid.toV0().toString());
     } else {
         throw new Error('IPFS add failed, please try again.');
+    }
+
+    // 4. Publish to IPNS
+    const ipnsKey = core.getInput('ipns-key')
+    console.info('ipns-key', ipnsKey)
+    if(cid && ipnsKey){
+        const keys = await ipfs.key.list()
+        console.info('keys:',keys)
+        if(!keys.find(item => item.name === ipnsKey)){
+            const k = await ipfs.key.gen(ipnsKey)
+            console.info('k:',k)
+        }
+        const res = await ipfs.name.publish(`/ipfs/${cid}`, {
+            key: ipnsKey
+        })
+        console.info('res:', res)
+        core.setOutput('ipns', res.name)
     }
 }
 
@@ -55,14 +72,27 @@ main().catch(error => {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.issue = exports.issueCommand = void 0;
 const os = __importStar(__nccwpck_require__(2087));
 const utils_1 = __nccwpck_require__(5278);
 /**
@@ -141,6 +171,25 @@ function escapeProperty(s) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -150,14 +199,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getState = exports.saveState = exports.group = exports.endGroup = exports.startGroup = exports.info = exports.warning = exports.error = exports.debug = exports.isDebug = exports.setFailed = exports.setCommandEcho = exports.setOutput = exports.getBooleanInput = exports.getMultilineInput = exports.getInput = exports.addPath = exports.setSecret = exports.exportVariable = exports.ExitCode = void 0;
 const command_1 = __nccwpck_require__(7351);
 const file_command_1 = __nccwpck_require__(717);
 const utils_1 = __nccwpck_require__(5278);
@@ -224,7 +267,9 @@ function addPath(inputPath) {
 }
 exports.addPath = addPath;
 /**
- * Gets the value of an input.  The value is also trimmed.
+ * Gets the value of an input.
+ * Unless trimWhitespace is set to false in InputOptions, the value is also trimmed.
+ * Returns an empty string if the value is not defined.
  *
  * @param     name     name of the input to get
  * @param     options  optional. See InputOptions.
@@ -235,9 +280,49 @@ function getInput(name, options) {
     if (options && options.required && !val) {
         throw new Error(`Input required and not supplied: ${name}`);
     }
+    if (options && options.trimWhitespace === false) {
+        return val;
+    }
     return val.trim();
 }
 exports.getInput = getInput;
+/**
+ * Gets the values of an multiline input.  Each value is also trimmed.
+ *
+ * @param     name     name of the input to get
+ * @param     options  optional. See InputOptions.
+ * @returns   string[]
+ *
+ */
+function getMultilineInput(name, options) {
+    const inputs = getInput(name, options)
+        .split('\n')
+        .filter(x => x !== '');
+    return inputs;
+}
+exports.getMultilineInput = getMultilineInput;
+/**
+ * Gets the input value of the boolean type in the YAML 1.2 "core schema" specification.
+ * Support boolean input list: `true | True | TRUE | false | False | FALSE` .
+ * The return value is also in boolean type.
+ * ref: https://yaml.org/spec/1.2/spec.html#id2804923
+ *
+ * @param     name     name of the input to get
+ * @param     options  optional. See InputOptions.
+ * @returns   boolean
+ */
+function getBooleanInput(name, options) {
+    const trueValue = ['true', 'True', 'TRUE'];
+    const falseValue = ['false', 'False', 'FALSE'];
+    const val = getInput(name, options);
+    if (trueValue.includes(val))
+        return true;
+    if (falseValue.includes(val))
+        return false;
+    throw new TypeError(`Input does not meet YAML 1.2 "Core Schema" specification: ${name}\n` +
+        `Support boolean input list: \`true | True | TRUE | false | False | FALSE\``);
+}
+exports.getBooleanInput = getBooleanInput;
 /**
  * Sets the value of an output.
  *
@@ -246,6 +331,7 @@ exports.getInput = getInput;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function setOutput(name, value) {
+    process.stdout.write(os.EOL);
     command_1.issueCommand('set-output', { name }, value);
 }
 exports.setOutput = setOutput;
@@ -387,14 +473,27 @@ exports.getState = getState;
 "use strict";
 
 // For internal use, subject to change.
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.issueCommand = void 0;
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const fs = __importStar(__nccwpck_require__(5747));
@@ -425,6 +524,7 @@ exports.issueCommand = issueCommand;
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toCommandValue = void 0;
 /**
  * Sanitizes an input into a string so it can be passed into issueCommand safely
  * @param input input to sanitize into a string
@@ -572,6 +672,834 @@ function base (ALPHABET) {
   }
 }
 module.exports = base
+
+
+/***/ }),
+
+/***/ 252:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = asPromise;
+
+/**
+ * Callback as used by {@link util.asPromise}.
+ * @typedef asPromiseCallback
+ * @type {function}
+ * @param {Error|null} error Error, if any
+ * @param {...*} params Additional arguments
+ * @returns {undefined}
+ */
+
+/**
+ * Returns a promise from a node-style callback function.
+ * @memberof util
+ * @param {asPromiseCallback} fn Function to call
+ * @param {*} ctx Function context
+ * @param {...*} params Function arguments
+ * @returns {Promise<*>} Promisified function
+ */
+function asPromise(fn, ctx/*, varargs */) {
+    var params  = new Array(arguments.length - 1),
+        offset  = 0,
+        index   = 2,
+        pending = true;
+    while (index < arguments.length)
+        params[offset++] = arguments[index++];
+    return new Promise(function executor(resolve, reject) {
+        params[offset] = function callback(err/*, varargs */) {
+            if (pending) {
+                pending = false;
+                if (err)
+                    reject(err);
+                else {
+                    var params = new Array(arguments.length - 1),
+                        offset = 0;
+                    while (offset < params.length)
+                        params[offset++] = arguments[offset];
+                    resolve.apply(null, params);
+                }
+            }
+        };
+        try {
+            fn.apply(ctx || null, params);
+        } catch (err) {
+            if (pending) {
+                pending = false;
+                reject(err);
+            }
+        }
+    });
+}
+
+
+/***/ }),
+
+/***/ 6718:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+/**
+ * A minimal base64 implementation for number arrays.
+ * @memberof util
+ * @namespace
+ */
+var base64 = exports;
+
+/**
+ * Calculates the byte length of a base64 encoded string.
+ * @param {string} string Base64 encoded string
+ * @returns {number} Byte length
+ */
+base64.length = function length(string) {
+    var p = string.length;
+    if (!p)
+        return 0;
+    var n = 0;
+    while (--p % 4 > 1 && string.charAt(p) === "=")
+        ++n;
+    return Math.ceil(string.length * 3) / 4 - n;
+};
+
+// Base64 encoding table
+var b64 = new Array(64);
+
+// Base64 decoding table
+var s64 = new Array(123);
+
+// 65..90, 97..122, 48..57, 43, 47
+for (var i = 0; i < 64;)
+    s64[b64[i] = i < 26 ? i + 65 : i < 52 ? i + 71 : i < 62 ? i - 4 : i - 59 | 43] = i++;
+
+/**
+ * Encodes a buffer to a base64 encoded string.
+ * @param {Uint8Array} buffer Source buffer
+ * @param {number} start Source start
+ * @param {number} end Source end
+ * @returns {string} Base64 encoded string
+ */
+base64.encode = function encode(buffer, start, end) {
+    var parts = null,
+        chunk = [];
+    var i = 0, // output index
+        j = 0, // goto index
+        t;     // temporary
+    while (start < end) {
+        var b = buffer[start++];
+        switch (j) {
+            case 0:
+                chunk[i++] = b64[b >> 2];
+                t = (b & 3) << 4;
+                j = 1;
+                break;
+            case 1:
+                chunk[i++] = b64[t | b >> 4];
+                t = (b & 15) << 2;
+                j = 2;
+                break;
+            case 2:
+                chunk[i++] = b64[t | b >> 6];
+                chunk[i++] = b64[b & 63];
+                j = 0;
+                break;
+        }
+        if (i > 8191) {
+            (parts || (parts = [])).push(String.fromCharCode.apply(String, chunk));
+            i = 0;
+        }
+    }
+    if (j) {
+        chunk[i++] = b64[t];
+        chunk[i++] = 61;
+        if (j === 1)
+            chunk[i++] = 61;
+    }
+    if (parts) {
+        if (i)
+            parts.push(String.fromCharCode.apply(String, chunk.slice(0, i)));
+        return parts.join("");
+    }
+    return String.fromCharCode.apply(String, chunk.slice(0, i));
+};
+
+var invalidEncoding = "invalid encoding";
+
+/**
+ * Decodes a base64 encoded string to a buffer.
+ * @param {string} string Source string
+ * @param {Uint8Array} buffer Destination buffer
+ * @param {number} offset Destination offset
+ * @returns {number} Number of bytes written
+ * @throws {Error} If encoding is invalid
+ */
+base64.decode = function decode(string, buffer, offset) {
+    var start = offset;
+    var j = 0, // goto index
+        t;     // temporary
+    for (var i = 0; i < string.length;) {
+        var c = string.charCodeAt(i++);
+        if (c === 61 && j > 1)
+            break;
+        if ((c = s64[c]) === undefined)
+            throw Error(invalidEncoding);
+        switch (j) {
+            case 0:
+                t = c;
+                j = 1;
+                break;
+            case 1:
+                buffer[offset++] = t << 2 | (c & 48) >> 4;
+                t = c;
+                j = 2;
+                break;
+            case 2:
+                buffer[offset++] = (t & 15) << 4 | (c & 60) >> 2;
+                t = c;
+                j = 3;
+                break;
+            case 3:
+                buffer[offset++] = (t & 3) << 6 | c;
+                j = 0;
+                break;
+        }
+    }
+    if (j === 1)
+        throw Error(invalidEncoding);
+    return offset - start;
+};
+
+/**
+ * Tests if the specified string appears to be base64 encoded.
+ * @param {string} string String to test
+ * @returns {boolean} `true` if probably base64 encoded, otherwise false
+ */
+base64.test = function test(string) {
+    return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(string);
+};
+
+
+/***/ }),
+
+/***/ 6850:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = EventEmitter;
+
+/**
+ * Constructs a new event emitter instance.
+ * @classdesc A minimal event emitter.
+ * @memberof util
+ * @constructor
+ */
+function EventEmitter() {
+
+    /**
+     * Registered listeners.
+     * @type {Object.<string,*>}
+     * @private
+     */
+    this._listeners = {};
+}
+
+/**
+ * Registers an event listener.
+ * @param {string} evt Event name
+ * @param {function} fn Listener
+ * @param {*} [ctx] Listener context
+ * @returns {util.EventEmitter} `this`
+ */
+EventEmitter.prototype.on = function on(evt, fn, ctx) {
+    (this._listeners[evt] || (this._listeners[evt] = [])).push({
+        fn  : fn,
+        ctx : ctx || this
+    });
+    return this;
+};
+
+/**
+ * Removes an event listener or any matching listeners if arguments are omitted.
+ * @param {string} [evt] Event name. Removes all listeners if omitted.
+ * @param {function} [fn] Listener to remove. Removes all listeners of `evt` if omitted.
+ * @returns {util.EventEmitter} `this`
+ */
+EventEmitter.prototype.off = function off(evt, fn) {
+    if (evt === undefined)
+        this._listeners = {};
+    else {
+        if (fn === undefined)
+            this._listeners[evt] = [];
+        else {
+            var listeners = this._listeners[evt];
+            for (var i = 0; i < listeners.length;)
+                if (listeners[i].fn === fn)
+                    listeners.splice(i, 1);
+                else
+                    ++i;
+        }
+    }
+    return this;
+};
+
+/**
+ * Emits an event by calling its listeners with the specified arguments.
+ * @param {string} evt Event name
+ * @param {...*} args Arguments
+ * @returns {util.EventEmitter} `this`
+ */
+EventEmitter.prototype.emit = function emit(evt) {
+    var listeners = this._listeners[evt];
+    if (listeners) {
+        var args = [],
+            i = 1;
+        for (; i < arguments.length;)
+            args.push(arguments[i++]);
+        for (i = 0; i < listeners.length;)
+            listeners[i].fn.apply(listeners[i++].ctx, args);
+    }
+    return this;
+};
+
+
+/***/ }),
+
+/***/ 1843:
+/***/ ((module) => {
+
+"use strict";
+
+
+module.exports = factory(factory);
+
+/**
+ * Reads / writes floats / doubles from / to buffers.
+ * @name util.float
+ * @namespace
+ */
+
+/**
+ * Writes a 32 bit float to a buffer using little endian byte order.
+ * @name util.float.writeFloatLE
+ * @function
+ * @param {number} val Value to write
+ * @param {Uint8Array} buf Target buffer
+ * @param {number} pos Target buffer offset
+ * @returns {undefined}
+ */
+
+/**
+ * Writes a 32 bit float to a buffer using big endian byte order.
+ * @name util.float.writeFloatBE
+ * @function
+ * @param {number} val Value to write
+ * @param {Uint8Array} buf Target buffer
+ * @param {number} pos Target buffer offset
+ * @returns {undefined}
+ */
+
+/**
+ * Reads a 32 bit float from a buffer using little endian byte order.
+ * @name util.float.readFloatLE
+ * @function
+ * @param {Uint8Array} buf Source buffer
+ * @param {number} pos Source buffer offset
+ * @returns {number} Value read
+ */
+
+/**
+ * Reads a 32 bit float from a buffer using big endian byte order.
+ * @name util.float.readFloatBE
+ * @function
+ * @param {Uint8Array} buf Source buffer
+ * @param {number} pos Source buffer offset
+ * @returns {number} Value read
+ */
+
+/**
+ * Writes a 64 bit double to a buffer using little endian byte order.
+ * @name util.float.writeDoubleLE
+ * @function
+ * @param {number} val Value to write
+ * @param {Uint8Array} buf Target buffer
+ * @param {number} pos Target buffer offset
+ * @returns {undefined}
+ */
+
+/**
+ * Writes a 64 bit double to a buffer using big endian byte order.
+ * @name util.float.writeDoubleBE
+ * @function
+ * @param {number} val Value to write
+ * @param {Uint8Array} buf Target buffer
+ * @param {number} pos Target buffer offset
+ * @returns {undefined}
+ */
+
+/**
+ * Reads a 64 bit double from a buffer using little endian byte order.
+ * @name util.float.readDoubleLE
+ * @function
+ * @param {Uint8Array} buf Source buffer
+ * @param {number} pos Source buffer offset
+ * @returns {number} Value read
+ */
+
+/**
+ * Reads a 64 bit double from a buffer using big endian byte order.
+ * @name util.float.readDoubleBE
+ * @function
+ * @param {Uint8Array} buf Source buffer
+ * @param {number} pos Source buffer offset
+ * @returns {number} Value read
+ */
+
+// Factory function for the purpose of node-based testing in modified global environments
+function factory(exports) {
+
+    // float: typed array
+    if (typeof Float32Array !== "undefined") (function() {
+
+        var f32 = new Float32Array([ -0 ]),
+            f8b = new Uint8Array(f32.buffer),
+            le  = f8b[3] === 128;
+
+        function writeFloat_f32_cpy(val, buf, pos) {
+            f32[0] = val;
+            buf[pos    ] = f8b[0];
+            buf[pos + 1] = f8b[1];
+            buf[pos + 2] = f8b[2];
+            buf[pos + 3] = f8b[3];
+        }
+
+        function writeFloat_f32_rev(val, buf, pos) {
+            f32[0] = val;
+            buf[pos    ] = f8b[3];
+            buf[pos + 1] = f8b[2];
+            buf[pos + 2] = f8b[1];
+            buf[pos + 3] = f8b[0];
+        }
+
+        /* istanbul ignore next */
+        exports.writeFloatLE = le ? writeFloat_f32_cpy : writeFloat_f32_rev;
+        /* istanbul ignore next */
+        exports.writeFloatBE = le ? writeFloat_f32_rev : writeFloat_f32_cpy;
+
+        function readFloat_f32_cpy(buf, pos) {
+            f8b[0] = buf[pos    ];
+            f8b[1] = buf[pos + 1];
+            f8b[2] = buf[pos + 2];
+            f8b[3] = buf[pos + 3];
+            return f32[0];
+        }
+
+        function readFloat_f32_rev(buf, pos) {
+            f8b[3] = buf[pos    ];
+            f8b[2] = buf[pos + 1];
+            f8b[1] = buf[pos + 2];
+            f8b[0] = buf[pos + 3];
+            return f32[0];
+        }
+
+        /* istanbul ignore next */
+        exports.readFloatLE = le ? readFloat_f32_cpy : readFloat_f32_rev;
+        /* istanbul ignore next */
+        exports.readFloatBE = le ? readFloat_f32_rev : readFloat_f32_cpy;
+
+    // float: ieee754
+    })(); else (function() {
+
+        function writeFloat_ieee754(writeUint, val, buf, pos) {
+            var sign = val < 0 ? 1 : 0;
+            if (sign)
+                val = -val;
+            if (val === 0)
+                writeUint(1 / val > 0 ? /* positive */ 0 : /* negative 0 */ 2147483648, buf, pos);
+            else if (isNaN(val))
+                writeUint(2143289344, buf, pos);
+            else if (val > 3.4028234663852886e+38) // +-Infinity
+                writeUint((sign << 31 | 2139095040) >>> 0, buf, pos);
+            else if (val < 1.1754943508222875e-38) // denormal
+                writeUint((sign << 31 | Math.round(val / 1.401298464324817e-45)) >>> 0, buf, pos);
+            else {
+                var exponent = Math.floor(Math.log(val) / Math.LN2),
+                    mantissa = Math.round(val * Math.pow(2, -exponent) * 8388608) & 8388607;
+                writeUint((sign << 31 | exponent + 127 << 23 | mantissa) >>> 0, buf, pos);
+            }
+        }
+
+        exports.writeFloatLE = writeFloat_ieee754.bind(null, writeUintLE);
+        exports.writeFloatBE = writeFloat_ieee754.bind(null, writeUintBE);
+
+        function readFloat_ieee754(readUint, buf, pos) {
+            var uint = readUint(buf, pos),
+                sign = (uint >> 31) * 2 + 1,
+                exponent = uint >>> 23 & 255,
+                mantissa = uint & 8388607;
+            return exponent === 255
+                ? mantissa
+                ? NaN
+                : sign * Infinity
+                : exponent === 0 // denormal
+                ? sign * 1.401298464324817e-45 * mantissa
+                : sign * Math.pow(2, exponent - 150) * (mantissa + 8388608);
+        }
+
+        exports.readFloatLE = readFloat_ieee754.bind(null, readUintLE);
+        exports.readFloatBE = readFloat_ieee754.bind(null, readUintBE);
+
+    })();
+
+    // double: typed array
+    if (typeof Float64Array !== "undefined") (function() {
+
+        var f64 = new Float64Array([-0]),
+            f8b = new Uint8Array(f64.buffer),
+            le  = f8b[7] === 128;
+
+        function writeDouble_f64_cpy(val, buf, pos) {
+            f64[0] = val;
+            buf[pos    ] = f8b[0];
+            buf[pos + 1] = f8b[1];
+            buf[pos + 2] = f8b[2];
+            buf[pos + 3] = f8b[3];
+            buf[pos + 4] = f8b[4];
+            buf[pos + 5] = f8b[5];
+            buf[pos + 6] = f8b[6];
+            buf[pos + 7] = f8b[7];
+        }
+
+        function writeDouble_f64_rev(val, buf, pos) {
+            f64[0] = val;
+            buf[pos    ] = f8b[7];
+            buf[pos + 1] = f8b[6];
+            buf[pos + 2] = f8b[5];
+            buf[pos + 3] = f8b[4];
+            buf[pos + 4] = f8b[3];
+            buf[pos + 5] = f8b[2];
+            buf[pos + 6] = f8b[1];
+            buf[pos + 7] = f8b[0];
+        }
+
+        /* istanbul ignore next */
+        exports.writeDoubleLE = le ? writeDouble_f64_cpy : writeDouble_f64_rev;
+        /* istanbul ignore next */
+        exports.writeDoubleBE = le ? writeDouble_f64_rev : writeDouble_f64_cpy;
+
+        function readDouble_f64_cpy(buf, pos) {
+            f8b[0] = buf[pos    ];
+            f8b[1] = buf[pos + 1];
+            f8b[2] = buf[pos + 2];
+            f8b[3] = buf[pos + 3];
+            f8b[4] = buf[pos + 4];
+            f8b[5] = buf[pos + 5];
+            f8b[6] = buf[pos + 6];
+            f8b[7] = buf[pos + 7];
+            return f64[0];
+        }
+
+        function readDouble_f64_rev(buf, pos) {
+            f8b[7] = buf[pos    ];
+            f8b[6] = buf[pos + 1];
+            f8b[5] = buf[pos + 2];
+            f8b[4] = buf[pos + 3];
+            f8b[3] = buf[pos + 4];
+            f8b[2] = buf[pos + 5];
+            f8b[1] = buf[pos + 6];
+            f8b[0] = buf[pos + 7];
+            return f64[0];
+        }
+
+        /* istanbul ignore next */
+        exports.readDoubleLE = le ? readDouble_f64_cpy : readDouble_f64_rev;
+        /* istanbul ignore next */
+        exports.readDoubleBE = le ? readDouble_f64_rev : readDouble_f64_cpy;
+
+    // double: ieee754
+    })(); else (function() {
+
+        function writeDouble_ieee754(writeUint, off0, off1, val, buf, pos) {
+            var sign = val < 0 ? 1 : 0;
+            if (sign)
+                val = -val;
+            if (val === 0) {
+                writeUint(0, buf, pos + off0);
+                writeUint(1 / val > 0 ? /* positive */ 0 : /* negative 0 */ 2147483648, buf, pos + off1);
+            } else if (isNaN(val)) {
+                writeUint(0, buf, pos + off0);
+                writeUint(2146959360, buf, pos + off1);
+            } else if (val > 1.7976931348623157e+308) { // +-Infinity
+                writeUint(0, buf, pos + off0);
+                writeUint((sign << 31 | 2146435072) >>> 0, buf, pos + off1);
+            } else {
+                var mantissa;
+                if (val < 2.2250738585072014e-308) { // denormal
+                    mantissa = val / 5e-324;
+                    writeUint(mantissa >>> 0, buf, pos + off0);
+                    writeUint((sign << 31 | mantissa / 4294967296) >>> 0, buf, pos + off1);
+                } else {
+                    var exponent = Math.floor(Math.log(val) / Math.LN2);
+                    if (exponent === 1024)
+                        exponent = 1023;
+                    mantissa = val * Math.pow(2, -exponent);
+                    writeUint(mantissa * 4503599627370496 >>> 0, buf, pos + off0);
+                    writeUint((sign << 31 | exponent + 1023 << 20 | mantissa * 1048576 & 1048575) >>> 0, buf, pos + off1);
+                }
+            }
+        }
+
+        exports.writeDoubleLE = writeDouble_ieee754.bind(null, writeUintLE, 0, 4);
+        exports.writeDoubleBE = writeDouble_ieee754.bind(null, writeUintBE, 4, 0);
+
+        function readDouble_ieee754(readUint, off0, off1, buf, pos) {
+            var lo = readUint(buf, pos + off0),
+                hi = readUint(buf, pos + off1);
+            var sign = (hi >> 31) * 2 + 1,
+                exponent = hi >>> 20 & 2047,
+                mantissa = 4294967296 * (hi & 1048575) + lo;
+            return exponent === 2047
+                ? mantissa
+                ? NaN
+                : sign * Infinity
+                : exponent === 0 // denormal
+                ? sign * 5e-324 * mantissa
+                : sign * Math.pow(2, exponent - 1075) * (mantissa + 4503599627370496);
+        }
+
+        exports.readDoubleLE = readDouble_ieee754.bind(null, readUintLE, 0, 4);
+        exports.readDoubleBE = readDouble_ieee754.bind(null, readUintBE, 4, 0);
+
+    })();
+
+    return exports;
+}
+
+// uint helpers
+
+function writeUintLE(val, buf, pos) {
+    buf[pos    ] =  val        & 255;
+    buf[pos + 1] =  val >>> 8  & 255;
+    buf[pos + 2] =  val >>> 16 & 255;
+    buf[pos + 3] =  val >>> 24;
+}
+
+function writeUintBE(val, buf, pos) {
+    buf[pos    ] =  val >>> 24;
+    buf[pos + 1] =  val >>> 16 & 255;
+    buf[pos + 2] =  val >>> 8  & 255;
+    buf[pos + 3] =  val        & 255;
+}
+
+function readUintLE(buf, pos) {
+    return (buf[pos    ]
+          | buf[pos + 1] << 8
+          | buf[pos + 2] << 16
+          | buf[pos + 3] << 24) >>> 0;
+}
+
+function readUintBE(buf, pos) {
+    return (buf[pos    ] << 24
+          | buf[pos + 1] << 16
+          | buf[pos + 2] << 8
+          | buf[pos + 3]) >>> 0;
+}
+
+
+/***/ }),
+
+/***/ 94:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = inquire;
+
+/**
+ * Requires a module only if available.
+ * @memberof util
+ * @param {string} moduleName Module to require
+ * @returns {?Object} Required module if available and not empty, otherwise `null`
+ */
+function inquire(moduleName) {
+    try {
+        var mod = eval("quire".replace(/^/,"re"))(moduleName); // eslint-disable-line no-eval
+        if (mod && (mod.length || Object.keys(mod).length))
+            return mod;
+    } catch (e) {} // eslint-disable-line no-empty
+    return null;
+}
+
+
+/***/ }),
+
+/***/ 7743:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = pool;
+
+/**
+ * An allocator as used by {@link util.pool}.
+ * @typedef PoolAllocator
+ * @type {function}
+ * @param {number} size Buffer size
+ * @returns {Uint8Array} Buffer
+ */
+
+/**
+ * A slicer as used by {@link util.pool}.
+ * @typedef PoolSlicer
+ * @type {function}
+ * @param {number} start Start offset
+ * @param {number} end End offset
+ * @returns {Uint8Array} Buffer slice
+ * @this {Uint8Array}
+ */
+
+/**
+ * A general purpose buffer pool.
+ * @memberof util
+ * @function
+ * @param {PoolAllocator} alloc Allocator
+ * @param {PoolSlicer} slice Slicer
+ * @param {number} [size=8192] Slab size
+ * @returns {PoolAllocator} Pooled allocator
+ */
+function pool(alloc, slice, size) {
+    var SIZE   = size || 8192;
+    var MAX    = SIZE >>> 1;
+    var slab   = null;
+    var offset = SIZE;
+    return function pool_alloc(size) {
+        if (size < 1 || size > MAX)
+            return alloc(size);
+        if (offset + size > SIZE) {
+            slab = alloc(SIZE);
+            offset = 0;
+        }
+        var buf = slice.call(slab, offset, offset += size);
+        if (offset & 7) // align to 32 bit
+            offset = (offset | 7) + 1;
+        return buf;
+    };
+}
+
+
+/***/ }),
+
+/***/ 9049:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+/**
+ * A minimal UTF8 implementation for number arrays.
+ * @memberof util
+ * @namespace
+ */
+var utf8 = exports;
+
+/**
+ * Calculates the UTF8 byte length of a string.
+ * @param {string} string String
+ * @returns {number} Byte length
+ */
+utf8.length = function utf8_length(string) {
+    var len = 0,
+        c = 0;
+    for (var i = 0; i < string.length; ++i) {
+        c = string.charCodeAt(i);
+        if (c < 128)
+            len += 1;
+        else if (c < 2048)
+            len += 2;
+        else if ((c & 0xFC00) === 0xD800 && (string.charCodeAt(i + 1) & 0xFC00) === 0xDC00) {
+            ++i;
+            len += 4;
+        } else
+            len += 3;
+    }
+    return len;
+};
+
+/**
+ * Reads UTF8 bytes as a string.
+ * @param {Uint8Array} buffer Source buffer
+ * @param {number} start Source start
+ * @param {number} end Source end
+ * @returns {string} String read
+ */
+utf8.read = function utf8_read(buffer, start, end) {
+    var len = end - start;
+    if (len < 1)
+        return "";
+    var parts = null,
+        chunk = [],
+        i = 0, // char offset
+        t;     // temporary
+    while (start < end) {
+        t = buffer[start++];
+        if (t < 128)
+            chunk[i++] = t;
+        else if (t > 191 && t < 224)
+            chunk[i++] = (t & 31) << 6 | buffer[start++] & 63;
+        else if (t > 239 && t < 365) {
+            t = ((t & 7) << 18 | (buffer[start++] & 63) << 12 | (buffer[start++] & 63) << 6 | buffer[start++] & 63) - 0x10000;
+            chunk[i++] = 0xD800 + (t >> 10);
+            chunk[i++] = 0xDC00 + (t & 1023);
+        } else
+            chunk[i++] = (t & 15) << 12 | (buffer[start++] & 63) << 6 | buffer[start++] & 63;
+        if (i > 8191) {
+            (parts || (parts = [])).push(String.fromCharCode.apply(String, chunk));
+            i = 0;
+        }
+    }
+    if (parts) {
+        if (i)
+            parts.push(String.fromCharCode.apply(String, chunk.slice(0, i)));
+        return parts.join("");
+    }
+    return String.fromCharCode.apply(String, chunk.slice(0, i));
+};
+
+/**
+ * Writes a string as UTF8 bytes.
+ * @param {string} string Source string
+ * @param {Uint8Array} buffer Destination buffer
+ * @param {number} offset Destination offset
+ * @returns {number} Bytes written
+ */
+utf8.write = function utf8_write(string, buffer, offset) {
+    var start = offset,
+        c1, // character 1
+        c2; // character 2
+    for (var i = 0; i < string.length; ++i) {
+        c1 = string.charCodeAt(i);
+        if (c1 < 128) {
+            buffer[offset++] = c1;
+        } else if (c1 < 2048) {
+            buffer[offset++] = c1 >> 6       | 192;
+            buffer[offset++] = c1       & 63 | 128;
+        } else if ((c1 & 0xFC00) === 0xD800 && ((c2 = string.charCodeAt(i + 1)) & 0xFC00) === 0xDC00) {
+            c1 = 0x10000 + ((c1 & 0x03FF) << 10) + (c2 & 0x03FF);
+            ++i;
+            buffer[offset++] = c1 >> 18      | 240;
+            buffer[offset++] = c1 >> 12 & 63 | 128;
+            buffer[offset++] = c1 >> 6  & 63 | 128;
+            buffer[offset++] = c1       & 63 | 128;
+        } else {
+            buffer[offset++] = c1 >> 12      | 224;
+            buffer[offset++] = c1 >> 6  & 63 | 128;
+            buffer[offset++] = c1       & 63 | 128;
+        }
+    }
+    return offset - start;
+};
 
 
 /***/ }),
@@ -752,18 +1680,6 @@ module.exports.anySignal = anySignal
 
 /***/ }),
 
-/***/ 5995:
-/***/ ((module) => {
-
-module.exports = r => {
-  const n = process.versions.node.split('.').map(x => parseInt(x, 10))
-  r = r.split('.').map(x => parseInt(x, 10))
-  return n[0] > r[0] || (n[0] === r[0] && (n[1] > r[1] || (n[1] === r[1] && n[2] >= r[2])))
-}
-
-
-/***/ }),
-
 /***/ 9417:
 /***/ ((module) => {
 
@@ -798,6 +1714,9 @@ function range(a, b, str) {
   var i = ai;
 
   if (ai >= 0 && bi > 0) {
+    if(a===b) {
+      return [ai, bi];
+    }
     begs = [];
     left = str.length;
 
@@ -4151,14 +5070,14 @@ module.exports = BufferList
 // Adapted from the reference implementation in RFC7693
 // Ported to Javascript by DC - https://github.com/dcposch
 
-var util = __nccwpck_require__(6144)
+const util = __nccwpck_require__(6144)
 
 // 64-bit unsigned addition
 // Sets v[a,a+1] += v[b,b+1]
 // v should be a Uint32Array
 function ADD64AA (v, a, b) {
-  var o0 = v[a] + v[b]
-  var o1 = v[a + 1] + v[b + 1]
+  const o0 = v[a] + v[b]
+  let o1 = v[a + 1] + v[b + 1]
   if (o0 >= 0x100000000) {
     o1++
   }
@@ -4170,11 +5089,11 @@ function ADD64AA (v, a, b) {
 // Sets v[a,a+1] += b
 // b0 is the low 32 bits of b, b1 represents the high 32 bits
 function ADD64AC (v, a, b0, b1) {
-  var o0 = v[a] + b0
+  let o0 = v[a] + b0
   if (b0 < 0) {
     o0 += 0x100000000
   }
-  var o1 = v[a + 1] + b1
+  let o1 = v[a + 1] + b1
   if (o0 >= 0x100000000) {
     o1++
   }
@@ -4184,26 +5103,23 @@ function ADD64AC (v, a, b0, b1) {
 
 // Little-endian byte access
 function B2B_GET32 (arr, i) {
-  return (arr[i] ^
-  (arr[i + 1] << 8) ^
-  (arr[i + 2] << 16) ^
-  (arr[i + 3] << 24))
+  return arr[i] ^ (arr[i + 1] << 8) ^ (arr[i + 2] << 16) ^ (arr[i + 3] << 24)
 }
 
 // G Mixing function
 // The ROTRs are inlined for speed
 function B2B_G (a, b, c, d, ix, iy) {
-  var x0 = m[ix]
-  var x1 = m[ix + 1]
-  var y0 = m[iy]
-  var y1 = m[iy + 1]
+  const x0 = m[ix]
+  const x1 = m[ix + 1]
+  const y0 = m[iy]
+  const y1 = m[iy + 1]
 
   ADD64AA(v, a, b) // v[a,a+1] += v[b,b+1] ... in JS we must store a uint64 as two uint32s
   ADD64AC(v, a, x0, x1) // v[a, a+1] += x ... x0 is the low 32 bits of x, x1 is the high 32 bits
 
   // v[d,d+1] = (v[d,d+1] xor v[a,a+1]) rotated to the right by 32 bits
-  var xor0 = v[d] ^ v[a]
-  var xor1 = v[d + 1] ^ v[a + 1]
+  let xor0 = v[d] ^ v[a]
+  let xor1 = v[d + 1] ^ v[a + 1]
   v[d] = xor1
   v[d + 1] = xor0
 
@@ -4234,39 +5150,235 @@ function B2B_G (a, b, c, d, ix, iy) {
 }
 
 // Initialization Vector
-var BLAKE2B_IV32 = new Uint32Array([
-  0xF3BCC908, 0x6A09E667, 0x84CAA73B, 0xBB67AE85,
-  0xFE94F82B, 0x3C6EF372, 0x5F1D36F1, 0xA54FF53A,
-  0xADE682D1, 0x510E527F, 0x2B3E6C1F, 0x9B05688C,
-  0xFB41BD6B, 0x1F83D9AB, 0x137E2179, 0x5BE0CD19
+const BLAKE2B_IV32 = new Uint32Array([
+  0xf3bcc908,
+  0x6a09e667,
+  0x84caa73b,
+  0xbb67ae85,
+  0xfe94f82b,
+  0x3c6ef372,
+  0x5f1d36f1,
+  0xa54ff53a,
+  0xade682d1,
+  0x510e527f,
+  0x2b3e6c1f,
+  0x9b05688c,
+  0xfb41bd6b,
+  0x1f83d9ab,
+  0x137e2179,
+  0x5be0cd19
 ])
 
-var SIGMA8 = [
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
-  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
-  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
-  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
-  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
-  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
-  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
-  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
-  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3
+const SIGMA8 = [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  14,
+  10,
+  4,
+  8,
+  9,
+  15,
+  13,
+  6,
+  1,
+  12,
+  0,
+  2,
+  11,
+  7,
+  5,
+  3,
+  11,
+  8,
+  12,
+  0,
+  5,
+  2,
+  15,
+  13,
+  10,
+  14,
+  3,
+  6,
+  7,
+  1,
+  9,
+  4,
+  7,
+  9,
+  3,
+  1,
+  13,
+  12,
+  11,
+  14,
+  2,
+  6,
+  5,
+  10,
+  4,
+  0,
+  15,
+  8,
+  9,
+  0,
+  5,
+  7,
+  2,
+  4,
+  10,
+  15,
+  14,
+  1,
+  11,
+  12,
+  6,
+  8,
+  3,
+  13,
+  2,
+  12,
+  6,
+  10,
+  0,
+  11,
+  8,
+  3,
+  4,
+  13,
+  7,
+  5,
+  15,
+  14,
+  1,
+  9,
+  12,
+  5,
+  1,
+  15,
+  14,
+  13,
+  4,
+  10,
+  0,
+  7,
+  6,
+  3,
+  9,
+  2,
+  8,
+  11,
+  13,
+  11,
+  7,
+  14,
+  12,
+  1,
+  3,
+  9,
+  5,
+  0,
+  15,
+  4,
+  8,
+  6,
+  2,
+  10,
+  6,
+  15,
+  14,
+  9,
+  11,
+  3,
+  0,
+  8,
+  12,
+  2,
+  13,
+  7,
+  1,
+  4,
+  10,
+  5,
+  10,
+  2,
+  8,
+  4,
+  7,
+  6,
+  1,
+  5,
+  15,
+  11,
+  9,
+  14,
+  3,
+  12,
+  13,
+  0,
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  14,
+  10,
+  4,
+  8,
+  9,
+  15,
+  13,
+  6,
+  1,
+  12,
+  0,
+  2,
+  11,
+  7,
+  5,
+  3
 ]
 
 // These are offsets into a uint64 buffer.
 // Multiply them all by 2 to make them offsets into a uint32 buffer,
 // because this is Javascript and we don't have uint64s
-var SIGMA82 = new Uint8Array(SIGMA8.map(function (x) { return x * 2 }))
+const SIGMA82 = new Uint8Array(
+  SIGMA8.map(function (x) {
+    return x * 2
+  })
+)
 
 // Compression function. 'last' flag indicates last block.
 // Note we're representing 16 uint64s as 32 uint32s
-var v = new Uint32Array(32)
-var m = new Uint32Array(32)
+const v = new Uint32Array(32)
+const m = new Uint32Array(32)
 function blake2bCompress (ctx, last) {
-  var i = 0
+  let i = 0
 
   // init work variables
   for (i = 0; i < 16; i++) {
@@ -4325,7 +5437,7 @@ function blake2bInit (outlen, key) {
   }
 
   // state, 'param block'
-  var ctx = {
+  const ctx = {
     b: new Uint8Array(128),
     h: new Uint32Array(16),
     t: 0, // input count
@@ -4334,10 +5446,10 @@ function blake2bInit (outlen, key) {
   }
 
   // initialize hash state
-  for (var i = 0; i < 16; i++) {
+  for (let i = 0; i < 16; i++) {
     ctx.h[i] = BLAKE2B_IV32[i]
   }
-  var keylen = key ? key.length : 0
+  const keylen = key ? key.length : 0
   ctx.h[0] ^= 0x01010000 ^ (keylen << 8) ^ outlen
 
   // key the hash, if applicable
@@ -4353,8 +5465,9 @@ function blake2bInit (outlen, key) {
 // Updates a BLAKE2b streaming hash
 // Requires hash context and Uint8Array (byte array)
 function blake2bUpdate (ctx, input) {
-  for (var i = 0; i < input.length; i++) {
-    if (ctx.c === 128) { // buffer full ?
+  for (let i = 0; i < input.length; i++) {
+    if (ctx.c === 128) {
+      // buffer full ?
       ctx.t += ctx.c // add counters
       blake2bCompress(ctx, false) // compress (not last)
       ctx.c = 0 // counter to zero
@@ -4368,14 +5481,15 @@ function blake2bUpdate (ctx, input) {
 function blake2bFinal (ctx) {
   ctx.t += ctx.c // mark last block offset
 
-  while (ctx.c < 128) { // fill up with zeros
+  while (ctx.c < 128) {
+    // fill up with zeros
     ctx.b[ctx.c++] = 0
   }
   blake2bCompress(ctx, true) // final block flag = 1
 
   // little endian convert and store
-  var out = new Uint8Array(ctx.outlen)
-  for (var i = 0; i < ctx.outlen; i++) {
+  const out = new Uint8Array(ctx.outlen)
+  for (let i = 0; i < ctx.outlen; i++) {
     out[i] = ctx.h[i >> 2] >> (8 * (i & 3))
   }
   return out
@@ -4395,7 +5509,7 @@ function blake2b (input, key, outlen) {
   input = util.normalizeInput(input)
 
   // do the math
-  var ctx = blake2bInit(outlen, key)
+  const ctx = blake2bInit(outlen, key)
   blake2bUpdate(ctx, input)
   return blake2bFinal(ctx)
 }
@@ -4409,7 +5523,7 @@ function blake2b (input, key, outlen) {
 // - key - optional key Uint8Array, up to 64 bytes
 // - outlen - optional output length in bytes, default 64
 function blake2bHex (input, key, outlen) {
-  var output = blake2b(input, key, outlen)
+  const output = blake2b(input, key, outlen)
   return util.toHex(output)
 }
 
@@ -4431,7 +5545,7 @@ module.exports = {
 // Adapted from the reference implementation in RFC7693
 // Ported to Javascript by DC - https://github.com/dcposch
 
-var util = __nccwpck_require__(6144)
+const util = __nccwpck_require__(6144)
 
 // Little-endian byte access.
 // Expects a Uint8Array and an index
@@ -4460,39 +5574,200 @@ function ROTR32 (x, y) {
 }
 
 // Initialization Vector.
-var BLAKE2S_IV = new Uint32Array([
-  0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
-  0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19])
+const BLAKE2S_IV = new Uint32Array([
+  0x6a09e667,
+  0xbb67ae85,
+  0x3c6ef372,
+  0xa54ff53a,
+  0x510e527f,
+  0x9b05688c,
+  0x1f83d9ab,
+  0x5be0cd19
+])
 
-var SIGMA = new Uint8Array([
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
-  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
-  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
-  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
-  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
-  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
-  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
-  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
-  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0])
+const SIGMA = new Uint8Array([
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  14,
+  10,
+  4,
+  8,
+  9,
+  15,
+  13,
+  6,
+  1,
+  12,
+  0,
+  2,
+  11,
+  7,
+  5,
+  3,
+  11,
+  8,
+  12,
+  0,
+  5,
+  2,
+  15,
+  13,
+  10,
+  14,
+  3,
+  6,
+  7,
+  1,
+  9,
+  4,
+  7,
+  9,
+  3,
+  1,
+  13,
+  12,
+  11,
+  14,
+  2,
+  6,
+  5,
+  10,
+  4,
+  0,
+  15,
+  8,
+  9,
+  0,
+  5,
+  7,
+  2,
+  4,
+  10,
+  15,
+  14,
+  1,
+  11,
+  12,
+  6,
+  8,
+  3,
+  13,
+  2,
+  12,
+  6,
+  10,
+  0,
+  11,
+  8,
+  3,
+  4,
+  13,
+  7,
+  5,
+  15,
+  14,
+  1,
+  9,
+  12,
+  5,
+  1,
+  15,
+  14,
+  13,
+  4,
+  10,
+  0,
+  7,
+  6,
+  3,
+  9,
+  2,
+  8,
+  11,
+  13,
+  11,
+  7,
+  14,
+  12,
+  1,
+  3,
+  9,
+  5,
+  0,
+  15,
+  4,
+  8,
+  6,
+  2,
+  10,
+  6,
+  15,
+  14,
+  9,
+  11,
+  3,
+  0,
+  8,
+  12,
+  2,
+  13,
+  7,
+  1,
+  4,
+  10,
+  5,
+  10,
+  2,
+  8,
+  4,
+  7,
+  6,
+  1,
+  5,
+  15,
+  11,
+  9,
+  14,
+  3,
+  12,
+  13,
+  0
+])
 
 // Compression function. "last" flag indicates last block
-var v = new Uint32Array(16)
-var m = new Uint32Array(16)
+const v = new Uint32Array(16)
+const m = new Uint32Array(16)
 function blake2sCompress (ctx, last) {
-  var i = 0
-  for (i = 0; i < 8; i++) { // init work variables
+  let i = 0
+  for (i = 0; i < 8; i++) {
+    // init work variables
     v[i] = ctx.h[i]
     v[i + 8] = BLAKE2S_IV[i]
   }
 
   v[12] ^= ctx.t // low 32 bits of offset
-  v[13] ^= (ctx.t / 0x100000000) // high 32 bits
-  if (last) { // last block flag set ?
+  v[13] ^= ctx.t / 0x100000000 // high 32 bits
+  if (last) {
+    // last block flag set ?
     v[14] = ~v[14]
   }
 
-  for (i = 0; i < 16; i++) { // get little-endian words
+  for (i = 0; i < 16; i++) {
+    // get little-endian words
     m[i] = B2S_GET32(ctx.b, 4 * i)
   }
 
@@ -4526,14 +5801,14 @@ function blake2sInit (outlen, key) {
   if (!(outlen > 0 && outlen <= 32)) {
     throw new Error('Incorrect output length, should be in [1, 32]')
   }
-  var keylen = key ? key.length : 0
+  const keylen = key ? key.length : 0
   if (key && !(keylen > 0 && keylen <= 32)) {
     throw new Error('Incorrect key length, should be in [1, 32]')
   }
 
-  var ctx = {
+  const ctx = {
     h: new Uint32Array(BLAKE2S_IV), // hash state
-    b: new Uint32Array(64), // input block
+    b: new Uint8Array(64), // input block
     c: 0, // pointer within block
     t: 0, // input count
     outlen: outlen // output length in bytes
@@ -4551,8 +5826,9 @@ function blake2sInit (outlen, key) {
 // Updates a BLAKE2s streaming hash
 // Requires hash context and Uint8Array (byte array)
 function blake2sUpdate (ctx, input) {
-  for (var i = 0; i < input.length; i++) {
-    if (ctx.c === 64) { // buffer full ?
+  for (let i = 0; i < input.length; i++) {
+    if (ctx.c === 64) {
+      // buffer full ?
       ctx.t += ctx.c // add counters
       blake2sCompress(ctx, false) // compress (not last)
       ctx.c = 0 // counter to zero
@@ -4565,15 +5841,16 @@ function blake2sUpdate (ctx, input) {
 // Returns a Uint8Array containing the message digest
 function blake2sFinal (ctx) {
   ctx.t += ctx.c // mark last block offset
-  while (ctx.c < 64) { // fill up with zeros
+  while (ctx.c < 64) {
+    // fill up with zeros
     ctx.b[ctx.c++] = 0
   }
   blake2sCompress(ctx, true) // final block flag = 1
 
   // little endian convert and store
-  var out = new Uint8Array(ctx.outlen)
-  for (var i = 0; i < ctx.outlen; i++) {
-    out[i] = (ctx.h[i >> 2] >> (8 * (i & 3))) & 0xFF
+  const out = new Uint8Array(ctx.outlen)
+  for (let i = 0; i < ctx.outlen; i++) {
+    out[i] = (ctx.h[i >> 2] >> (8 * (i & 3))) & 0xff
   }
   return out
 }
@@ -4592,7 +5869,7 @@ function blake2s (input, key, outlen) {
   input = util.normalizeInput(input)
 
   // do the math
-  var ctx = blake2sInit(outlen, key)
+  const ctx = blake2sInit(outlen, key)
   blake2sUpdate(ctx, input)
   return blake2sFinal(ctx)
 }
@@ -4606,7 +5883,7 @@ function blake2s (input, key, outlen) {
 // - key - optional key Uint8Array, up to 32 bytes
 // - outlen - optional output length in bytes, default 64
 function blake2sHex (input, key, outlen) {
-  var output = blake2s(input, key, outlen)
+  const output = blake2s(input, key, outlen)
   return util.toHex(output)
 }
 
@@ -4624,8 +5901,8 @@ module.exports = {
 /***/ 9793:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var b2b = __nccwpck_require__(1781)
-var b2s = __nccwpck_require__(9943)
+const b2b = __nccwpck_require__(1781)
+const b2s = __nccwpck_require__(9943)
 
 module.exports = {
   blake2b: b2b.blake2b,
@@ -4646,16 +5923,16 @@ module.exports = {
 /***/ 6144:
 /***/ ((module) => {
 
-var ERROR_MSG_INPUT = 'Input must be an string, Buffer or Uint8Array'
+const ERROR_MSG_INPUT = 'Input must be an string, Buffer or Uint8Array'
 
 // For convenience, let people hash a string, not just a Uint8Array
 function normalizeInput (input) {
-  var ret
+  let ret
   if (input instanceof Uint8Array) {
     ret = input
   } else if (input instanceof Buffer) {
     ret = new Uint8Array(input)
-  } else if (typeof (input) === 'string') {
+  } else if (typeof input === 'string') {
     ret = new Uint8Array(Buffer.from(input, 'utf8'))
   } else {
     throw new Error(ERROR_MSG_INPUT)
@@ -4666,9 +5943,11 @@ function normalizeInput (input) {
 // Converts a Uint8Array to a hexadecimal string
 // For example, toHex([255, 0, 255]) returns "ff00ff"
 function toHex (bytes) {
-  return Array.prototype.map.call(bytes, function (n) {
-    return (n < 16 ? '0' : '') + n.toString(16)
-  }).join('')
+  return Array.prototype.map
+    .call(bytes, function (n) {
+      return (n < 16 ? '0' : '') + n.toString(16)
+    })
+    .join('')
 }
 
 // Converts any value in [0...2^32-1] to an 8-character hex string
@@ -4679,8 +5958,8 @@ function uint32ToHex (val) {
 // For debugging: prints out hash state in the same format as the RFC
 // sample computation exactly, so that you can diff
 function debugPrint (label, arr, size) {
-  var msg = '\n' + label + ' = '
-  for (var i = 0; i < arr.length; i += 2) {
+  let msg = '\n' + label + ' = '
+  for (let i = 0; i < arr.length; i += 2) {
     if (size === 32) {
       msg += uint32ToHex(arr[i]).toUpperCase()
       msg += ' '
@@ -4701,23 +5980,25 @@ function debugPrint (label, arr, size) {
 // For performance testing: generates N bytes of input, hashes M times
 // Measures and prints MB/second hash performance each time
 function testSpeed (hashFn, N, M) {
-  var startMs = new Date().getTime()
+  let startMs = new Date().getTime()
 
-  var input = new Uint8Array(N)
-  for (var i = 0; i < N; i++) {
+  const input = new Uint8Array(N)
+  for (let i = 0; i < N; i++) {
     input[i] = i % 256
   }
-  var genMs = new Date().getTime()
+  const genMs = new Date().getTime()
   console.log('Generated random input in ' + (genMs - startMs) + 'ms')
   startMs = genMs
 
-  for (i = 0; i < M; i++) {
-    var hashHex = hashFn(input)
-    var hashMs = new Date().getTime()
-    var ms = hashMs - startMs
+  for (let i = 0; i < M; i++) {
+    const hashHex = hashFn(input)
+    const hashMs = new Date().getTime()
+    const ms = hashMs - startMs
     startMs = hashMs
     console.log('Hashed in ' + ms + 'ms: ' + hashHex.substring(0, 20) + '...')
-    console.log(Math.round(N / (1 << 20) / (ms / 1000) * 100) / 100 + ' MB PER SECOND')
+    console.log(
+      Math.round((N / (1 << 20) / (ms / 1000)) * 100) / 100 + ' MB PER SECOND'
+    )
   }
 }
 
@@ -4756,105 +6037,6 @@ function blobToIt (blob) {
 }
 
 module.exports = blobToIt
-
-
-/***/ }),
-
-/***/ 2813:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const {
-    URLWithLegacySupport,
-    format,
-    URLSearchParams,
-    defaultBase
-} = __nccwpck_require__(2262);
-const relative = __nccwpck_require__(2361);
-
-module.exports = {
-    URL: URLWithLegacySupport,
-    URLSearchParams,
-    format,
-    relative,
-    defaultBase
-};
-
-
-/***/ }),
-
-/***/ 2361:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { URLWithLegacySupport, format } = __nccwpck_require__(2262);
-
-module.exports = (url, location = {}, protocolMap = {}, defaultProtocol) => {
-    let protocol = location.protocol ?
-        location.protocol.replace(':', '') :
-        'http';
-
-    // Check protocol map
-    protocol = (protocolMap[protocol] || defaultProtocol || protocol) + ':';
-    let urlParsed;
-
-    try {
-        urlParsed = new URLWithLegacySupport(url);
-    } catch (err) {
-        urlParsed = {};
-    }
-
-    const base = Object.assign({}, location, {
-        protocol: protocol || urlParsed.protocol,
-        host: location.host || urlParsed.host
-    });
-
-    return new URLWithLegacySupport(url, format(base)).toString();
-};
-
-
-/***/ }),
-
-/***/ 2262:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { URL, URLSearchParams, format } = __nccwpck_require__(8835);
-
-// https://github.com/nodejs/node/issues/12682
-const defaultBase = 'http://localhost';
-
-class URLWithLegacySupport extends URL {
-    constructor(url = '', base = defaultBase) {
-        super(url, base);
-        this.path = this.pathname + this.search;
-        this.auth =
-            this.username && this.password ?
-                this.username + ':' + this.password :
-                null;
-        this.query =
-            this.search && this.search.startsWith('?') ?
-                this.search.slice(1) :
-                null;
-    }
-
-    format() {
-        return this.toString();
-    }
-}
-
-module.exports = {
-    URLWithLegacySupport,
-    URLSearchParams,
-    format,
-    defaultBase
-};
 
 
 /***/ }),
@@ -6299,7 +7481,7 @@ const utils = __nccwpck_require__(9344)
 const c = __nccwpck_require__(7296)
 const Simple = __nccwpck_require__(771)
 const Tagged = __nccwpck_require__(9654)
-const { URL } = __nccwpck_require__(2813)
+const { URL } = __nccwpck_require__(1286)
 
 /**
  * Transform binary cbor data into JavaScript objects.
@@ -6399,7 +7581,7 @@ class Decoder {
 
   // Finish the current parent
   _closeParent () {
-    var p = this._parents.pop()
+    const p = this._parents.pop()
 
     if (p.length > 0) {
       throw new Error(`Missing ${p.length} elements`)
@@ -7110,7 +8292,7 @@ function collectObject (val) {
 
 
 const { Buffer } = __nccwpck_require__(3407)
-const { URL } = __nccwpck_require__(2813)
+const { URL } = __nccwpck_require__(1286)
 const Bignumber = __nccwpck_require__(7558).BigNumber
 
 const utils = __nccwpck_require__(9344)
@@ -7433,20 +8615,20 @@ class Encoder {
       return this._pushUInt8(NULL)
     }
 
-    var len = this.semanticTypes.length
-    for (var i = 0; i < len; i++) {
+    const len = this.semanticTypes.length
+    for (let i = 0; i < len; i++) {
       if (obj instanceof this.semanticTypes[i][0]) {
         return this.semanticTypes[i][1].call(obj, this, obj)
       }
     }
 
-    var f = obj.encodeCBOR
+    const f = obj.encodeCBOR
     if (typeof f === 'function') {
       return f.call(obj, this)
     }
 
-    var keys = Object.keys(obj)
-    var keyLength = keys.length
+    const keys = Object.keys(obj)
+    const keyLength = keys.length
     if (!this._pushInt(keyLength, MT.MAP)) {
       return false
     }
@@ -7469,7 +8651,7 @@ class Encoder {
       return a
     }).sort(utils.keySorter)
 
-    for (var j = 0; j < len; j++) {
+    for (let j = 0; j < len; j++) {
       if (!this.push(map[j][0])) {
         return false
       }
@@ -7499,7 +8681,7 @@ class Encoder {
    * @returns {boolean} true on success
    */
   pushAny (obj) {
-    var typ = toType(obj)
+    const typ = toType(obj)
 
     switch (typ) {
       case 'Number':
@@ -7550,22 +8732,22 @@ class Encoder {
       return null
     }
 
-    var result = this.result
-    var resultLength = this.resultLength
-    var resultMethod = this.resultMethod
-    var offset = this.offset
+    const result = this.result
+    const resultLength = this.resultLength
+    const resultMethod = this.resultMethod
+    const offset = this.offset
 
     // Determine the size of the buffer
-    var size = 0
-    var i = 0
+    let size = 0
+    let i = 0
 
     for (; i < offset; i++) {
       size += resultLength[i]
     }
 
-    var res = Buffer.allocUnsafe(size)
-    var index = 0
-    var length = 0
+    const res = Buffer.allocUnsafe(size)
+    let index = 0
+    let length = 0
 
     // Write the content into the result buffer
     for (i = 0; i < offset; i++) {
@@ -7597,7 +8779,7 @@ class Encoder {
       index += length
     }
 
-    var tmp = res
+    const tmp = res
 
     this._reset()
 
@@ -7613,6 +8795,7 @@ class Encoder {
 
   /**
    * Encode the given value
+   *
    * @param {*} o
    * @returns {Buffer}
    */
@@ -7713,7 +8896,7 @@ class Simple {
   /**
    * Push the simple value onto the CBOR stream
    *
-   * @param {cbor.Encoder} gen The generator to push onto
+   * @param {cbor.Encoder} gen - The generator to push onto
    * @returns {number}
    */
   encodeCBOR (gen) {
@@ -7736,9 +8919,9 @@ class Simple {
    * `null` or `undefined`, so that the value can be passed through a
    * stream in object mode.
    *
-   * @param {Number} val - the CBOR additional info to convert
+   * @param {number} val - the CBOR additional info to convert
    * @param {bool} hasParent - Does the CBOR item have a parent?
-   * @returns {(null|undefined|Boolean|Symbol)} - the decoded value
+   * @returns {(null | undefined | boolean | symbol)} - the decoded value
    */
   static decode (val, hasParent) {
     if (hasParent == null) {
@@ -7792,7 +8975,7 @@ class Tagged {
   /**
    * Creates an instance of Tagged.
    *
-   * @param {Number} tag - the number of the tag
+   * @param {number} tag - the number of the tag
    * @param {any} value - the value inside the tag
    * @param {Error} err - the error that was thrown parsing the tag, or null
    */
@@ -7811,7 +8994,7 @@ class Tagged {
   /**
    * Convert to a String
    *
-   * @returns {String} string of the form '1(2)'
+   * @returns {string} string of the form '1(2)'
    */
   toString () {
     return `${this.tag}(${JSON.stringify(this.value)})`
@@ -7820,7 +9003,7 @@ class Tagged {
   /**
    * Push the simple value onto the CBOR stream
    *
-   * @param {cbor.Encoder} gen The generator to push onto
+   * @param {cbor.Encoder} gen - The generator to push onto
    * @returns {number}
    */
   encodeCBOR (gen) {
@@ -7835,12 +9018,12 @@ class Tagged {
    * of a function.
    *
    * @param {Object} converters - keys in the object are a tag number, the value
-   *   is a function that takes the decoded CBOR and returns a JavaScript value
-   *   of the appropriate type.  Throw an exception in the function on errors.
+   * is a function that takes the decoded CBOR and returns a JavaScript value
+   * of the appropriate type.  Throw an exception in the function on errors.
    * @returns {any} - the converted item
    */
   convert (converters) {
-    var er, f
+    let er, f
     f = converters != null ? converters[this.tag] : undefined
     if (typeof f !== 'function') {
       f = Tagged['_tag' + this.tag]
@@ -7878,14 +9061,13 @@ const SHIFT16 = constants.SHIFT16
 const MAX_SAFE_HIGH = 0x1fffff
 
 exports.parseHalf = function parseHalf (buf) {
-  var exp, mant, sign
-  sign = buf[0] & 0x80 ? -1 : 1
-  exp = (buf[0] & 0x7C) >> 2
-  mant = ((buf[0] & 0x03) << 8) | buf[1]
+  const sign = buf[0] & 0x80 ? -1 : 1
+  const exp = (buf[0] & 0x7C) >> 2
+  const mant = ((buf[0] & 0x03) << 8) | buf[1]
   if (!exp) {
     return sign * 5.9604644775390625e-8 * mant
   } else if (exp === 0x1f) {
-    return sign * (mant ? 0 / 0 : 2e308)
+    return sign * (mant ? 0 / 0 : 2e308) // eslint-disable-line no-loss-of-precision
   } else {
     return sign * Math.pow(2, exp - 25) * (1024 + mant)
   }
@@ -7964,7 +9146,7 @@ exports.writeHalf = function writeHalf (buf, half) {
   //   int exp = (u32.u >> 23) & 0xff;
   //   int mant = u32.u & 0x7fffff;
 
-  var s16 = (u >> 16) & 0x8000 // top bit is sign
+  let s16 = (u >> 16) & 0x8000 // top bit is sign
   const exp = (u >> 23) & 0xff // then 5 bits of exponent
   const mant = u & 0x7fffff
 
@@ -8007,8 +9189,8 @@ exports.writeHalf = function writeHalf (buf, half) {
 }
 
 exports.keySorter = function (a, b) {
-  var lenA = a[0].byteLength
-  var lenB = b[0].byteLength
+  const lenA = a[0].byteLength
+  const lenB = b[0].byteLength
 
   if (lenA > lenB) {
     return 1
@@ -8620,7 +9802,7 @@ class CID {
    * @returns {CID}
    */
   toV1 () {
-    return new CID(1, this.codec, this.multihash)
+    return new CID(1, this.codec, this.multihash, this.multibaseName)
   }
 
   /**
@@ -8725,80 +9907,6 @@ class CID {
 CID.codecs = codecs
 
 module.exports = CID
-
-
-/***/ }),
-
-/***/ 4642:
-/***/ ((module) => {
-
-"use strict";
-
-
-function withIs(Class, { className, symbolName }) {
-    const symbol = Symbol.for(symbolName);
-
-    const ClassIsWrapper = {
-        // The code below assigns the class wrapper to an object to trick
-        // JavaScript engines to show the name of the extended class when
-        // logging an instances.
-        // We are assigning an anonymous class (class wrapper) to the object
-        // with key `className` to keep the correct name.
-        // If this is not supported it falls back to logging `ClassIsWrapper`.
-        [className]: class extends Class {
-            constructor(...args) {
-                super(...args);
-                Object.defineProperty(this, symbol, { value: true });
-            }
-
-            get [Symbol.toStringTag]() {
-                return className;
-            }
-        },
-    }[className];
-
-    ClassIsWrapper[`is${className}`] = (obj) => !!(obj && obj[symbol]);
-
-    return ClassIsWrapper;
-}
-
-function withIsProto(Class, { className, symbolName, withoutNew }) {
-    const symbol = Symbol.for(symbolName);
-
-    /* eslint-disable object-shorthand */
-    const ClassIsWrapper = {
-        [className]: function (...args) {
-            if (withoutNew && !(this instanceof ClassIsWrapper)) {
-                return new ClassIsWrapper(...args);
-            }
-
-            const _this = Class.call(this, ...args) || this;
-
-            if (_this && !_this[symbol]) {
-                Object.defineProperty(_this, symbol, { value: true });
-            }
-
-            return _this;
-        },
-    }[className];
-    /* eslint-enable object-shorthand */
-
-    ClassIsWrapper.prototype = Object.create(Class.prototype);
-    ClassIsWrapper.prototype.constructor = ClassIsWrapper;
-
-    Object.defineProperty(ClassIsWrapper.prototype, Symbol.toStringTag, {
-        get() {
-            return className;
-        },
-    });
-
-    ClassIsWrapper[`is${className}`] = (obj) => !!(obj && obj[symbol]);
-
-    return ClassIsWrapper;
-}
-
-module.exports = withIs;
-module.exports.proto = withIsProto;
 
 
 /***/ }),
@@ -9663,9 +10771,9 @@ formatters.O = function (v) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 var url = __nccwpck_require__(8835);
-var http = __nccwpck_require__(5876);
+var http = __nccwpck_require__(8605);
 var https = __nccwpck_require__(7211);
-var zlib = __nccwpck_require__(1903);
+var zlib = __nccwpck_require__(8761);
 var Stream = __nccwpck_require__(2413);
 var encoding = __nccwpck_require__(8685);
 
@@ -11311,6 +12419,18 @@ function checkEncoding(name) {
 "use strict";
 
 
+/**
+ * @typedef {{ [key: string]: any }} Extensions
+ * @typedef {Error} Err
+ * @property {string} message
+ */
+
+/**
+ *
+ * @param {Error} obj
+ * @param {Extensions} props
+ * @returns {Error & Extensions}
+ */
 function assign(obj, props) {
     for (const key in props) {
         Object.defineProperty(obj, key, {
@@ -11323,6 +12443,13 @@ function assign(obj, props) {
     return obj;
 }
 
+/**
+ *
+ * @param {any} err - An Error
+ * @param {string|Extensions} code - A string code or props to set on the error
+ * @param {Extensions} [props] - Props to set on the error
+ * @returns {Error & Extensions}
+ */
 function createError(err, code, props) {
     if (!err || typeof err === 'string') {
         throw new TypeError('Please pass an Error to err-code');
@@ -11334,10 +12461,10 @@ function createError(err, code, props) {
 
     if (typeof code === 'object') {
         props = code;
-        code = undefined;
+        code = '';
     }
 
-    if (code != null) {
+    if (code) {
         props.code = code;
     }
 
@@ -11351,7 +12478,10 @@ function createError(err, code, props) {
 
         ErrClass.prototype = Object.create(Object.getPrototypeOf(err));
 
-        return assign(new ErrClass(), props);
+        // @ts-ignore
+        const output = assign(new ErrClass(), props);
+
+        return output;
     }
 }
 
@@ -12314,2055 +13444,6 @@ module.exports = class FastFIFO {
 
 /***/ }),
 
-/***/ 3338:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const mkdirsSync = __nccwpck_require__(8605).mkdirsSync
-const utimesMillisSync = __nccwpck_require__(2548).utimesMillisSync
-const stat = __nccwpck_require__(3901)
-
-function copySync (src, dest, opts) {
-  if (typeof opts === 'function') {
-    opts = { filter: opts }
-  }
-
-  opts = opts || {}
-  opts.clobber = 'clobber' in opts ? !!opts.clobber : true // default to true for now
-  opts.overwrite = 'overwrite' in opts ? !!opts.overwrite : opts.clobber // overwrite falls back to clobber
-
-  // Warn about using preserveTimestamps on 32-bit node
-  if (opts.preserveTimestamps && process.arch === 'ia32') {
-    console.warn(`fs-extra: Using the preserveTimestamps option in 32-bit node is not recommended;\n
-    see https://github.com/jprichardson/node-fs-extra/issues/269`)
-  }
-
-  const { srcStat, destStat } = stat.checkPathsSync(src, dest, 'copy')
-  stat.checkParentPathsSync(src, srcStat, dest, 'copy')
-  return handleFilterAndCopy(destStat, src, dest, opts)
-}
-
-function handleFilterAndCopy (destStat, src, dest, opts) {
-  if (opts.filter && !opts.filter(src, dest)) return
-  const destParent = path.dirname(dest)
-  if (!fs.existsSync(destParent)) mkdirsSync(destParent)
-  return startCopy(destStat, src, dest, opts)
-}
-
-function startCopy (destStat, src, dest, opts) {
-  if (opts.filter && !opts.filter(src, dest)) return
-  return getStats(destStat, src, dest, opts)
-}
-
-function getStats (destStat, src, dest, opts) {
-  const statSync = opts.dereference ? fs.statSync : fs.lstatSync
-  const srcStat = statSync(src)
-
-  if (srcStat.isDirectory()) return onDir(srcStat, destStat, src, dest, opts)
-  else if (srcStat.isFile() ||
-           srcStat.isCharacterDevice() ||
-           srcStat.isBlockDevice()) return onFile(srcStat, destStat, src, dest, opts)
-  else if (srcStat.isSymbolicLink()) return onLink(destStat, src, dest, opts)
-}
-
-function onFile (srcStat, destStat, src, dest, opts) {
-  if (!destStat) return copyFile(srcStat, src, dest, opts)
-  return mayCopyFile(srcStat, src, dest, opts)
-}
-
-function mayCopyFile (srcStat, src, dest, opts) {
-  if (opts.overwrite) {
-    fs.unlinkSync(dest)
-    return copyFile(srcStat, src, dest, opts)
-  } else if (opts.errorOnExist) {
-    throw new Error(`'${dest}' already exists`)
-  }
-}
-
-function copyFile (srcStat, src, dest, opts) {
-  fs.copyFileSync(src, dest)
-  if (opts.preserveTimestamps) handleTimestamps(srcStat.mode, src, dest)
-  return setDestMode(dest, srcStat.mode)
-}
-
-function handleTimestamps (srcMode, src, dest) {
-  // Make sure the file is writable before setting the timestamp
-  // otherwise open fails with EPERM when invoked with 'r+'
-  // (through utimes call)
-  if (fileIsNotWritable(srcMode)) makeFileWritable(dest, srcMode)
-  return setDestTimestamps(src, dest)
-}
-
-function fileIsNotWritable (srcMode) {
-  return (srcMode & 0o200) === 0
-}
-
-function makeFileWritable (dest, srcMode) {
-  return setDestMode(dest, srcMode | 0o200)
-}
-
-function setDestMode (dest, srcMode) {
-  return fs.chmodSync(dest, srcMode)
-}
-
-function setDestTimestamps (src, dest) {
-  // The initial srcStat.atime cannot be trusted
-  // because it is modified by the read(2) system call
-  // (See https://nodejs.org/api/fs.html#fs_stat_time_values)
-  const updatedSrcStat = fs.statSync(src)
-  return utimesMillisSync(dest, updatedSrcStat.atime, updatedSrcStat.mtime)
-}
-
-function onDir (srcStat, destStat, src, dest, opts) {
-  if (!destStat) return mkDirAndCopy(srcStat.mode, src, dest, opts)
-  if (destStat && !destStat.isDirectory()) {
-    throw new Error(`Cannot overwrite non-directory '${dest}' with directory '${src}'.`)
-  }
-  return copyDir(src, dest, opts)
-}
-
-function mkDirAndCopy (srcMode, src, dest, opts) {
-  fs.mkdirSync(dest)
-  copyDir(src, dest, opts)
-  return setDestMode(dest, srcMode)
-}
-
-function copyDir (src, dest, opts) {
-  fs.readdirSync(src).forEach(item => copyDirItem(item, src, dest, opts))
-}
-
-function copyDirItem (item, src, dest, opts) {
-  const srcItem = path.join(src, item)
-  const destItem = path.join(dest, item)
-  const { destStat } = stat.checkPathsSync(srcItem, destItem, 'copy')
-  return startCopy(destStat, srcItem, destItem, opts)
-}
-
-function onLink (destStat, src, dest, opts) {
-  let resolvedSrc = fs.readlinkSync(src)
-  if (opts.dereference) {
-    resolvedSrc = path.resolve(process.cwd(), resolvedSrc)
-  }
-
-  if (!destStat) {
-    return fs.symlinkSync(resolvedSrc, dest)
-  } else {
-    let resolvedDest
-    try {
-      resolvedDest = fs.readlinkSync(dest)
-    } catch (err) {
-      // dest exists and is a regular file or directory,
-      // Windows may throw UNKNOWN error. If dest already exists,
-      // fs throws error anyway, so no need to guard against it here.
-      if (err.code === 'EINVAL' || err.code === 'UNKNOWN') return fs.symlinkSync(resolvedSrc, dest)
-      throw err
-    }
-    if (opts.dereference) {
-      resolvedDest = path.resolve(process.cwd(), resolvedDest)
-    }
-    if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
-      throw new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`)
-    }
-
-    // prevent copy if src is a subdir of dest since unlinking
-    // dest in this case would result in removing src contents
-    // and therefore a broken symlink would be created.
-    if (fs.statSync(dest).isDirectory() && stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
-      throw new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`)
-    }
-    return copyLink(resolvedSrc, dest)
-  }
-}
-
-function copyLink (resolvedSrc, dest) {
-  fs.unlinkSync(dest)
-  return fs.symlinkSync(resolvedSrc, dest)
-}
-
-module.exports = copySync
-
-
-/***/ }),
-
-/***/ 1135:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-module.exports = {
-  copySync: __nccwpck_require__(3338)
-}
-
-
-/***/ }),
-
-/***/ 8834:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const mkdirs = __nccwpck_require__(8605).mkdirs
-const pathExists = __nccwpck_require__(3835).pathExists
-const utimesMillis = __nccwpck_require__(2548).utimesMillis
-const stat = __nccwpck_require__(3901)
-
-function copy (src, dest, opts, cb) {
-  if (typeof opts === 'function' && !cb) {
-    cb = opts
-    opts = {}
-  } else if (typeof opts === 'function') {
-    opts = { filter: opts }
-  }
-
-  cb = cb || function () {}
-  opts = opts || {}
-
-  opts.clobber = 'clobber' in opts ? !!opts.clobber : true // default to true for now
-  opts.overwrite = 'overwrite' in opts ? !!opts.overwrite : opts.clobber // overwrite falls back to clobber
-
-  // Warn about using preserveTimestamps on 32-bit node
-  if (opts.preserveTimestamps && process.arch === 'ia32') {
-    console.warn(`fs-extra: Using the preserveTimestamps option in 32-bit node is not recommended;\n
-    see https://github.com/jprichardson/node-fs-extra/issues/269`)
-  }
-
-  stat.checkPaths(src, dest, 'copy', (err, stats) => {
-    if (err) return cb(err)
-    const { srcStat, destStat } = stats
-    stat.checkParentPaths(src, srcStat, dest, 'copy', err => {
-      if (err) return cb(err)
-      if (opts.filter) return handleFilter(checkParentDir, destStat, src, dest, opts, cb)
-      return checkParentDir(destStat, src, dest, opts, cb)
-    })
-  })
-}
-
-function checkParentDir (destStat, src, dest, opts, cb) {
-  const destParent = path.dirname(dest)
-  pathExists(destParent, (err, dirExists) => {
-    if (err) return cb(err)
-    if (dirExists) return startCopy(destStat, src, dest, opts, cb)
-    mkdirs(destParent, err => {
-      if (err) return cb(err)
-      return startCopy(destStat, src, dest, opts, cb)
-    })
-  })
-}
-
-function handleFilter (onInclude, destStat, src, dest, opts, cb) {
-  Promise.resolve(opts.filter(src, dest)).then(include => {
-    if (include) return onInclude(destStat, src, dest, opts, cb)
-    return cb()
-  }, error => cb(error))
-}
-
-function startCopy (destStat, src, dest, opts, cb) {
-  if (opts.filter) return handleFilter(getStats, destStat, src, dest, opts, cb)
-  return getStats(destStat, src, dest, opts, cb)
-}
-
-function getStats (destStat, src, dest, opts, cb) {
-  const stat = opts.dereference ? fs.stat : fs.lstat
-  stat(src, (err, srcStat) => {
-    if (err) return cb(err)
-
-    if (srcStat.isDirectory()) return onDir(srcStat, destStat, src, dest, opts, cb)
-    else if (srcStat.isFile() ||
-             srcStat.isCharacterDevice() ||
-             srcStat.isBlockDevice()) return onFile(srcStat, destStat, src, dest, opts, cb)
-    else if (srcStat.isSymbolicLink()) return onLink(destStat, src, dest, opts, cb)
-  })
-}
-
-function onFile (srcStat, destStat, src, dest, opts, cb) {
-  if (!destStat) return copyFile(srcStat, src, dest, opts, cb)
-  return mayCopyFile(srcStat, src, dest, opts, cb)
-}
-
-function mayCopyFile (srcStat, src, dest, opts, cb) {
-  if (opts.overwrite) {
-    fs.unlink(dest, err => {
-      if (err) return cb(err)
-      return copyFile(srcStat, src, dest, opts, cb)
-    })
-  } else if (opts.errorOnExist) {
-    return cb(new Error(`'${dest}' already exists`))
-  } else return cb()
-}
-
-function copyFile (srcStat, src, dest, opts, cb) {
-  fs.copyFile(src, dest, err => {
-    if (err) return cb(err)
-    if (opts.preserveTimestamps) return handleTimestampsAndMode(srcStat.mode, src, dest, cb)
-    return setDestMode(dest, srcStat.mode, cb)
-  })
-}
-
-function handleTimestampsAndMode (srcMode, src, dest, cb) {
-  // Make sure the file is writable before setting the timestamp
-  // otherwise open fails with EPERM when invoked with 'r+'
-  // (through utimes call)
-  if (fileIsNotWritable(srcMode)) {
-    return makeFileWritable(dest, srcMode, err => {
-      if (err) return cb(err)
-      return setDestTimestampsAndMode(srcMode, src, dest, cb)
-    })
-  }
-  return setDestTimestampsAndMode(srcMode, src, dest, cb)
-}
-
-function fileIsNotWritable (srcMode) {
-  return (srcMode & 0o200) === 0
-}
-
-function makeFileWritable (dest, srcMode, cb) {
-  return setDestMode(dest, srcMode | 0o200, cb)
-}
-
-function setDestTimestampsAndMode (srcMode, src, dest, cb) {
-  setDestTimestamps(src, dest, err => {
-    if (err) return cb(err)
-    return setDestMode(dest, srcMode, cb)
-  })
-}
-
-function setDestMode (dest, srcMode, cb) {
-  return fs.chmod(dest, srcMode, cb)
-}
-
-function setDestTimestamps (src, dest, cb) {
-  // The initial srcStat.atime cannot be trusted
-  // because it is modified by the read(2) system call
-  // (See https://nodejs.org/api/fs.html#fs_stat_time_values)
-  fs.stat(src, (err, updatedSrcStat) => {
-    if (err) return cb(err)
-    return utimesMillis(dest, updatedSrcStat.atime, updatedSrcStat.mtime, cb)
-  })
-}
-
-function onDir (srcStat, destStat, src, dest, opts, cb) {
-  if (!destStat) return mkDirAndCopy(srcStat.mode, src, dest, opts, cb)
-  if (destStat && !destStat.isDirectory()) {
-    return cb(new Error(`Cannot overwrite non-directory '${dest}' with directory '${src}'.`))
-  }
-  return copyDir(src, dest, opts, cb)
-}
-
-function mkDirAndCopy (srcMode, src, dest, opts, cb) {
-  fs.mkdir(dest, err => {
-    if (err) return cb(err)
-    copyDir(src, dest, opts, err => {
-      if (err) return cb(err)
-      return setDestMode(dest, srcMode, cb)
-    })
-  })
-}
-
-function copyDir (src, dest, opts, cb) {
-  fs.readdir(src, (err, items) => {
-    if (err) return cb(err)
-    return copyDirItems(items, src, dest, opts, cb)
-  })
-}
-
-function copyDirItems (items, src, dest, opts, cb) {
-  const item = items.pop()
-  if (!item) return cb()
-  return copyDirItem(items, item, src, dest, opts, cb)
-}
-
-function copyDirItem (items, item, src, dest, opts, cb) {
-  const srcItem = path.join(src, item)
-  const destItem = path.join(dest, item)
-  stat.checkPaths(srcItem, destItem, 'copy', (err, stats) => {
-    if (err) return cb(err)
-    const { destStat } = stats
-    startCopy(destStat, srcItem, destItem, opts, err => {
-      if (err) return cb(err)
-      return copyDirItems(items, src, dest, opts, cb)
-    })
-  })
-}
-
-function onLink (destStat, src, dest, opts, cb) {
-  fs.readlink(src, (err, resolvedSrc) => {
-    if (err) return cb(err)
-    if (opts.dereference) {
-      resolvedSrc = path.resolve(process.cwd(), resolvedSrc)
-    }
-
-    if (!destStat) {
-      return fs.symlink(resolvedSrc, dest, cb)
-    } else {
-      fs.readlink(dest, (err, resolvedDest) => {
-        if (err) {
-          // dest exists and is a regular file or directory,
-          // Windows may throw UNKNOWN error. If dest already exists,
-          // fs throws error anyway, so no need to guard against it here.
-          if (err.code === 'EINVAL' || err.code === 'UNKNOWN') return fs.symlink(resolvedSrc, dest, cb)
-          return cb(err)
-        }
-        if (opts.dereference) {
-          resolvedDest = path.resolve(process.cwd(), resolvedDest)
-        }
-        if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
-          return cb(new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`))
-        }
-
-        // do not copy if src is a subdir of dest since unlinking
-        // dest in this case would result in removing src contents
-        // and therefore a broken symlink would be created.
-        if (destStat.isDirectory() && stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
-          return cb(new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`))
-        }
-        return copyLink(resolvedSrc, dest, cb)
-      })
-    }
-  })
-}
-
-function copyLink (resolvedSrc, dest, cb) {
-  fs.unlink(dest, err => {
-    if (err) return cb(err)
-    return fs.symlink(resolvedSrc, dest, cb)
-  })
-}
-
-module.exports = copy
-
-
-/***/ }),
-
-/***/ 1335:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-module.exports = {
-  copy: u(__nccwpck_require__(8834))
-}
-
-
-/***/ }),
-
-/***/ 6970:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const mkdir = __nccwpck_require__(8605)
-const remove = __nccwpck_require__(7357)
-
-const emptyDir = u(function emptyDir (dir, callback) {
-  callback = callback || function () {}
-  fs.readdir(dir, (err, items) => {
-    if (err) return mkdir.mkdirs(dir, callback)
-
-    items = items.map(item => path.join(dir, item))
-
-    deleteItem()
-
-    function deleteItem () {
-      const item = items.pop()
-      if (!item) return callback()
-      remove.remove(item, err => {
-        if (err) return callback(err)
-        deleteItem()
-      })
-    }
-  })
-})
-
-function emptyDirSync (dir) {
-  let items
-  try {
-    items = fs.readdirSync(dir)
-  } catch {
-    return mkdir.mkdirsSync(dir)
-  }
-
-  items.forEach(item => {
-    item = path.join(dir, item)
-    remove.removeSync(item)
-  })
-}
-
-module.exports = {
-  emptyDirSync,
-  emptydirSync: emptyDirSync,
-  emptyDir,
-  emptydir: emptyDir
-}
-
-
-/***/ }),
-
-/***/ 2164:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const path = __nccwpck_require__(5622)
-const fs = __nccwpck_require__(7758)
-const mkdir = __nccwpck_require__(8605)
-
-function createFile (file, callback) {
-  function makeFile () {
-    fs.writeFile(file, '', err => {
-      if (err) return callback(err)
-      callback()
-    })
-  }
-
-  fs.stat(file, (err, stats) => { // eslint-disable-line handle-callback-err
-    if (!err && stats.isFile()) return callback()
-    const dir = path.dirname(file)
-    fs.stat(dir, (err, stats) => {
-      if (err) {
-        // if the directory doesn't exist, make it
-        if (err.code === 'ENOENT') {
-          return mkdir.mkdirs(dir, err => {
-            if (err) return callback(err)
-            makeFile()
-          })
-        }
-        return callback(err)
-      }
-
-      if (stats.isDirectory()) makeFile()
-      else {
-        // parent is not a directory
-        // This is just to cause an internal ENOTDIR error to be thrown
-        fs.readdir(dir, err => {
-          if (err) return callback(err)
-        })
-      }
-    })
-  })
-}
-
-function createFileSync (file) {
-  let stats
-  try {
-    stats = fs.statSync(file)
-  } catch {}
-  if (stats && stats.isFile()) return
-
-  const dir = path.dirname(file)
-  try {
-    if (!fs.statSync(dir).isDirectory()) {
-      // parent is not a directory
-      // This is just to cause an internal ENOTDIR error to be thrown
-      fs.readdirSync(dir)
-    }
-  } catch (err) {
-    // If the stat call above failed because the directory doesn't exist, create it
-    if (err && err.code === 'ENOENT') mkdir.mkdirsSync(dir)
-    else throw err
-  }
-
-  fs.writeFileSync(file, '')
-}
-
-module.exports = {
-  createFile: u(createFile),
-  createFileSync
-}
-
-
-/***/ }),
-
-/***/ 55:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const file = __nccwpck_require__(2164)
-const link = __nccwpck_require__(3797)
-const symlink = __nccwpck_require__(2549)
-
-module.exports = {
-  // file
-  createFile: file.createFile,
-  createFileSync: file.createFileSync,
-  ensureFile: file.createFile,
-  ensureFileSync: file.createFileSync,
-  // link
-  createLink: link.createLink,
-  createLinkSync: link.createLinkSync,
-  ensureLink: link.createLink,
-  ensureLinkSync: link.createLinkSync,
-  // symlink
-  createSymlink: symlink.createSymlink,
-  createSymlinkSync: symlink.createSymlinkSync,
-  ensureSymlink: symlink.createSymlink,
-  ensureSymlinkSync: symlink.createSymlinkSync
-}
-
-
-/***/ }),
-
-/***/ 3797:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const path = __nccwpck_require__(5622)
-const fs = __nccwpck_require__(7758)
-const mkdir = __nccwpck_require__(8605)
-const pathExists = __nccwpck_require__(3835).pathExists
-
-function createLink (srcpath, dstpath, callback) {
-  function makeLink (srcpath, dstpath) {
-    fs.link(srcpath, dstpath, err => {
-      if (err) return callback(err)
-      callback(null)
-    })
-  }
-
-  pathExists(dstpath, (err, destinationExists) => {
-    if (err) return callback(err)
-    if (destinationExists) return callback(null)
-    fs.lstat(srcpath, (err) => {
-      if (err) {
-        err.message = err.message.replace('lstat', 'ensureLink')
-        return callback(err)
-      }
-
-      const dir = path.dirname(dstpath)
-      pathExists(dir, (err, dirExists) => {
-        if (err) return callback(err)
-        if (dirExists) return makeLink(srcpath, dstpath)
-        mkdir.mkdirs(dir, err => {
-          if (err) return callback(err)
-          makeLink(srcpath, dstpath)
-        })
-      })
-    })
-  })
-}
-
-function createLinkSync (srcpath, dstpath) {
-  const destinationExists = fs.existsSync(dstpath)
-  if (destinationExists) return undefined
-
-  try {
-    fs.lstatSync(srcpath)
-  } catch (err) {
-    err.message = err.message.replace('lstat', 'ensureLink')
-    throw err
-  }
-
-  const dir = path.dirname(dstpath)
-  const dirExists = fs.existsSync(dir)
-  if (dirExists) return fs.linkSync(srcpath, dstpath)
-  mkdir.mkdirsSync(dir)
-
-  return fs.linkSync(srcpath, dstpath)
-}
-
-module.exports = {
-  createLink: u(createLink),
-  createLinkSync
-}
-
-
-/***/ }),
-
-/***/ 3727:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const path = __nccwpck_require__(5622)
-const fs = __nccwpck_require__(7758)
-const pathExists = __nccwpck_require__(3835).pathExists
-
-/**
- * Function that returns two types of paths, one relative to symlink, and one
- * relative to the current working directory. Checks if path is absolute or
- * relative. If the path is relative, this function checks if the path is
- * relative to symlink or relative to current working directory. This is an
- * initiative to find a smarter `srcpath` to supply when building symlinks.
- * This allows you to determine which path to use out of one of three possible
- * types of source paths. The first is an absolute path. This is detected by
- * `path.isAbsolute()`. When an absolute path is provided, it is checked to
- * see if it exists. If it does it's used, if not an error is returned
- * (callback)/ thrown (sync). The other two options for `srcpath` are a
- * relative url. By default Node's `fs.symlink` works by creating a symlink
- * using `dstpath` and expects the `srcpath` to be relative to the newly
- * created symlink. If you provide a `srcpath` that does not exist on the file
- * system it results in a broken symlink. To minimize this, the function
- * checks to see if the 'relative to symlink' source file exists, and if it
- * does it will use it. If it does not, it checks if there's a file that
- * exists that is relative to the current working directory, if does its used.
- * This preserves the expectations of the original fs.symlink spec and adds
- * the ability to pass in `relative to current working direcotry` paths.
- */
-
-function symlinkPaths (srcpath, dstpath, callback) {
-  if (path.isAbsolute(srcpath)) {
-    return fs.lstat(srcpath, (err) => {
-      if (err) {
-        err.message = err.message.replace('lstat', 'ensureSymlink')
-        return callback(err)
-      }
-      return callback(null, {
-        toCwd: srcpath,
-        toDst: srcpath
-      })
-    })
-  } else {
-    const dstdir = path.dirname(dstpath)
-    const relativeToDst = path.join(dstdir, srcpath)
-    return pathExists(relativeToDst, (err, exists) => {
-      if (err) return callback(err)
-      if (exists) {
-        return callback(null, {
-          toCwd: relativeToDst,
-          toDst: srcpath
-        })
-      } else {
-        return fs.lstat(srcpath, (err) => {
-          if (err) {
-            err.message = err.message.replace('lstat', 'ensureSymlink')
-            return callback(err)
-          }
-          return callback(null, {
-            toCwd: srcpath,
-            toDst: path.relative(dstdir, srcpath)
-          })
-        })
-      }
-    })
-  }
-}
-
-function symlinkPathsSync (srcpath, dstpath) {
-  let exists
-  if (path.isAbsolute(srcpath)) {
-    exists = fs.existsSync(srcpath)
-    if (!exists) throw new Error('absolute srcpath does not exist')
-    return {
-      toCwd: srcpath,
-      toDst: srcpath
-    }
-  } else {
-    const dstdir = path.dirname(dstpath)
-    const relativeToDst = path.join(dstdir, srcpath)
-    exists = fs.existsSync(relativeToDst)
-    if (exists) {
-      return {
-        toCwd: relativeToDst,
-        toDst: srcpath
-      }
-    } else {
-      exists = fs.existsSync(srcpath)
-      if (!exists) throw new Error('relative srcpath does not exist')
-      return {
-        toCwd: srcpath,
-        toDst: path.relative(dstdir, srcpath)
-      }
-    }
-  }
-}
-
-module.exports = {
-  symlinkPaths,
-  symlinkPathsSync
-}
-
-
-/***/ }),
-
-/***/ 8254:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-
-function symlinkType (srcpath, type, callback) {
-  callback = (typeof type === 'function') ? type : callback
-  type = (typeof type === 'function') ? false : type
-  if (type) return callback(null, type)
-  fs.lstat(srcpath, (err, stats) => {
-    if (err) return callback(null, 'file')
-    type = (stats && stats.isDirectory()) ? 'dir' : 'file'
-    callback(null, type)
-  })
-}
-
-function symlinkTypeSync (srcpath, type) {
-  let stats
-
-  if (type) return type
-  try {
-    stats = fs.lstatSync(srcpath)
-  } catch {
-    return 'file'
-  }
-  return (stats && stats.isDirectory()) ? 'dir' : 'file'
-}
-
-module.exports = {
-  symlinkType,
-  symlinkTypeSync
-}
-
-
-/***/ }),
-
-/***/ 2549:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const path = __nccwpck_require__(5622)
-const fs = __nccwpck_require__(7758)
-const _mkdirs = __nccwpck_require__(8605)
-const mkdirs = _mkdirs.mkdirs
-const mkdirsSync = _mkdirs.mkdirsSync
-
-const _symlinkPaths = __nccwpck_require__(3727)
-const symlinkPaths = _symlinkPaths.symlinkPaths
-const symlinkPathsSync = _symlinkPaths.symlinkPathsSync
-
-const _symlinkType = __nccwpck_require__(8254)
-const symlinkType = _symlinkType.symlinkType
-const symlinkTypeSync = _symlinkType.symlinkTypeSync
-
-const pathExists = __nccwpck_require__(3835).pathExists
-
-function createSymlink (srcpath, dstpath, type, callback) {
-  callback = (typeof type === 'function') ? type : callback
-  type = (typeof type === 'function') ? false : type
-
-  pathExists(dstpath, (err, destinationExists) => {
-    if (err) return callback(err)
-    if (destinationExists) return callback(null)
-    symlinkPaths(srcpath, dstpath, (err, relative) => {
-      if (err) return callback(err)
-      srcpath = relative.toDst
-      symlinkType(relative.toCwd, type, (err, type) => {
-        if (err) return callback(err)
-        const dir = path.dirname(dstpath)
-        pathExists(dir, (err, dirExists) => {
-          if (err) return callback(err)
-          if (dirExists) return fs.symlink(srcpath, dstpath, type, callback)
-          mkdirs(dir, err => {
-            if (err) return callback(err)
-            fs.symlink(srcpath, dstpath, type, callback)
-          })
-        })
-      })
-    })
-  })
-}
-
-function createSymlinkSync (srcpath, dstpath, type) {
-  const destinationExists = fs.existsSync(dstpath)
-  if (destinationExists) return undefined
-
-  const relative = symlinkPathsSync(srcpath, dstpath)
-  srcpath = relative.toDst
-  type = symlinkTypeSync(relative.toCwd, type)
-  const dir = path.dirname(dstpath)
-  const exists = fs.existsSync(dir)
-  if (exists) return fs.symlinkSync(srcpath, dstpath, type)
-  mkdirsSync(dir)
-  return fs.symlinkSync(srcpath, dstpath, type)
-}
-
-module.exports = {
-  createSymlink: u(createSymlink),
-  createSymlinkSync
-}
-
-
-/***/ }),
-
-/***/ 1176:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-// This is adapted from https://github.com/normalize/mz
-// Copyright (c) 2014-2016 Jonathan Ong me@jongleberry.com and Contributors
-const u = __nccwpck_require__(9046).fromCallback
-const fs = __nccwpck_require__(7758)
-
-const api = [
-  'access',
-  'appendFile',
-  'chmod',
-  'chown',
-  'close',
-  'copyFile',
-  'fchmod',
-  'fchown',
-  'fdatasync',
-  'fstat',
-  'fsync',
-  'ftruncate',
-  'futimes',
-  'lchmod',
-  'lchown',
-  'link',
-  'lstat',
-  'mkdir',
-  'mkdtemp',
-  'open',
-  'opendir',
-  'readdir',
-  'readFile',
-  'readlink',
-  'realpath',
-  'rename',
-  'rm',
-  'rmdir',
-  'stat',
-  'symlink',
-  'truncate',
-  'unlink',
-  'utimes',
-  'writeFile'
-].filter(key => {
-  // Some commands are not available on some systems. Ex:
-  // fs.opendir was added in Node.js v12.12.0
-  // fs.rm was added in Node.js v14.14.0
-  // fs.lchown is not available on at least some Linux
-  return typeof fs[key] === 'function'
-})
-
-// Export all keys:
-Object.keys(fs).forEach(key => {
-  if (key === 'promises') {
-    // fs.promises is a getter property that triggers ExperimentalWarning
-    // Don't re-export it here, the getter is defined in "lib/index.js"
-    return
-  }
-  exports[key] = fs[key]
-})
-
-// Universalify async methods:
-api.forEach(method => {
-  exports[method] = u(fs[method])
-})
-
-// We differ from mz/fs in that we still ship the old, broken, fs.exists()
-// since we are a drop-in replacement for the native module
-exports.exists = function (filename, callback) {
-  if (typeof callback === 'function') {
-    return fs.exists(filename, callback)
-  }
-  return new Promise(resolve => {
-    return fs.exists(filename, resolve)
-  })
-}
-
-// fs.read(), fs.write(), & fs.writev() need special treatment due to multiple callback args
-
-exports.read = function (fd, buffer, offset, length, position, callback) {
-  if (typeof callback === 'function') {
-    return fs.read(fd, buffer, offset, length, position, callback)
-  }
-  return new Promise((resolve, reject) => {
-    fs.read(fd, buffer, offset, length, position, (err, bytesRead, buffer) => {
-      if (err) return reject(err)
-      resolve({ bytesRead, buffer })
-    })
-  })
-}
-
-// Function signature can be
-// fs.write(fd, buffer[, offset[, length[, position]]], callback)
-// OR
-// fs.write(fd, string[, position[, encoding]], callback)
-// We need to handle both cases, so we use ...args
-exports.write = function (fd, buffer, ...args) {
-  if (typeof args[args.length - 1] === 'function') {
-    return fs.write(fd, buffer, ...args)
-  }
-
-  return new Promise((resolve, reject) => {
-    fs.write(fd, buffer, ...args, (err, bytesWritten, buffer) => {
-      if (err) return reject(err)
-      resolve({ bytesWritten, buffer })
-    })
-  })
-}
-
-// fs.writev only available in Node v12.9.0+
-if (typeof fs.writev === 'function') {
-  // Function signature is
-  // s.writev(fd, buffers[, position], callback)
-  // We need to handle the optional arg, so we use ...args
-  exports.writev = function (fd, buffers, ...args) {
-    if (typeof args[args.length - 1] === 'function') {
-      return fs.writev(fd, buffers, ...args)
-    }
-
-    return new Promise((resolve, reject) => {
-      fs.writev(fd, buffers, ...args, (err, bytesWritten, buffers) => {
-        if (err) return reject(err)
-        resolve({ bytesWritten, buffers })
-      })
-    })
-  }
-}
-
-// fs.realpath.native only available in Node v9.2+
-if (typeof fs.realpath.native === 'function') {
-  exports.realpath.native = u(fs.realpath.native)
-}
-
-
-/***/ }),
-
-/***/ 5630:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-module.exports = {
-  // Export promiseified graceful-fs:
-  ...__nccwpck_require__(1176),
-  // Export extra methods:
-  ...__nccwpck_require__(1135),
-  ...__nccwpck_require__(1335),
-  ...__nccwpck_require__(6970),
-  ...__nccwpck_require__(55),
-  ...__nccwpck_require__(213),
-  ...__nccwpck_require__(8605),
-  ...__nccwpck_require__(9665),
-  ...__nccwpck_require__(1497),
-  ...__nccwpck_require__(6570),
-  ...__nccwpck_require__(3835),
-  ...__nccwpck_require__(7357)
-}
-
-// Export fs.promises as a getter property so that we don't trigger
-// ExperimentalWarning before fs.promises is actually accessed.
-const fs = __nccwpck_require__(5747)
-if (Object.getOwnPropertyDescriptor(fs, 'promises')) {
-  Object.defineProperty(module.exports, "promises", ({
-    get () { return fs.promises }
-  }))
-}
-
-
-/***/ }),
-
-/***/ 213:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromPromise
-const jsonFile = __nccwpck_require__(8970)
-
-jsonFile.outputJson = u(__nccwpck_require__(531))
-jsonFile.outputJsonSync = __nccwpck_require__(9421)
-// aliases
-jsonFile.outputJSON = jsonFile.outputJson
-jsonFile.outputJSONSync = jsonFile.outputJsonSync
-jsonFile.writeJSON = jsonFile.writeJson
-jsonFile.writeJSONSync = jsonFile.writeJsonSync
-jsonFile.readJSON = jsonFile.readJson
-jsonFile.readJSONSync = jsonFile.readJsonSync
-
-module.exports = jsonFile
-
-
-/***/ }),
-
-/***/ 8970:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const jsonFile = __nccwpck_require__(6160)
-
-module.exports = {
-  // jsonfile exports
-  readJson: jsonFile.readFile,
-  readJsonSync: jsonFile.readFileSync,
-  writeJson: jsonFile.writeFile,
-  writeJsonSync: jsonFile.writeFileSync
-}
-
-
-/***/ }),
-
-/***/ 9421:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { stringify } = __nccwpck_require__(5902)
-const { outputFileSync } = __nccwpck_require__(6570)
-
-function outputJsonSync (file, data, options) {
-  const str = stringify(data, options)
-
-  outputFileSync(file, str, options)
-}
-
-module.exports = outputJsonSync
-
-
-/***/ }),
-
-/***/ 531:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { stringify } = __nccwpck_require__(5902)
-const { outputFile } = __nccwpck_require__(6570)
-
-async function outputJson (file, data, options = {}) {
-  const str = stringify(data, options)
-
-  await outputFile(file, str, options)
-}
-
-module.exports = outputJson
-
-
-/***/ }),
-
-/***/ 8605:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-const u = __nccwpck_require__(9046).fromPromise
-const { makeDir: _makeDir, makeDirSync } = __nccwpck_require__(2751)
-const makeDir = u(_makeDir)
-
-module.exports = {
-  mkdirs: makeDir,
-  mkdirsSync: makeDirSync,
-  // alias
-  mkdirp: makeDir,
-  mkdirpSync: makeDirSync,
-  ensureDir: makeDir,
-  ensureDirSync: makeDirSync
-}
-
-
-/***/ }),
-
-/***/ 2751:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-// Adapted from https://github.com/sindresorhus/make-dir
-// Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
-// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-const fs = __nccwpck_require__(1176)
-const path = __nccwpck_require__(5622)
-const atLeastNode = __nccwpck_require__(5995)
-
-const useNativeRecursiveOption = atLeastNode('10.12.0')
-
-// https://github.com/nodejs/node/issues/8987
-// https://github.com/libuv/libuv/pull/1088
-const checkPath = pth => {
-  if (process.platform === 'win32') {
-    const pathHasInvalidWinCharacters = /[<>:"|?*]/.test(pth.replace(path.parse(pth).root, ''))
-
-    if (pathHasInvalidWinCharacters) {
-      const error = new Error(`Path contains invalid characters: ${pth}`)
-      error.code = 'EINVAL'
-      throw error
-    }
-  }
-}
-
-const processOptions = options => {
-  const defaults = { mode: 0o777 }
-  if (typeof options === 'number') options = { mode: options }
-  return { ...defaults, ...options }
-}
-
-const permissionError = pth => {
-  // This replicates the exception of `fs.mkdir` with native the
-  // `recusive` option when run on an invalid drive under Windows.
-  const error = new Error(`operation not permitted, mkdir '${pth}'`)
-  error.code = 'EPERM'
-  error.errno = -4048
-  error.path = pth
-  error.syscall = 'mkdir'
-  return error
-}
-
-module.exports.makeDir = async (input, options) => {
-  checkPath(input)
-  options = processOptions(options)
-
-  if (useNativeRecursiveOption) {
-    const pth = path.resolve(input)
-
-    return fs.mkdir(pth, {
-      mode: options.mode,
-      recursive: true
-    })
-  }
-
-  const make = async pth => {
-    try {
-      await fs.mkdir(pth, options.mode)
-    } catch (error) {
-      if (error.code === 'EPERM') {
-        throw error
-      }
-
-      if (error.code === 'ENOENT') {
-        if (path.dirname(pth) === pth) {
-          throw permissionError(pth)
-        }
-
-        if (error.message.includes('null bytes')) {
-          throw error
-        }
-
-        await make(path.dirname(pth))
-        return make(pth)
-      }
-
-      try {
-        const stats = await fs.stat(pth)
-        if (!stats.isDirectory()) {
-          // This error is never exposed to the user
-          // it is caught below, and the original error is thrown
-          throw new Error('The path is not a directory')
-        }
-      } catch {
-        throw error
-      }
-    }
-  }
-
-  return make(path.resolve(input))
-}
-
-module.exports.makeDirSync = (input, options) => {
-  checkPath(input)
-  options = processOptions(options)
-
-  if (useNativeRecursiveOption) {
-    const pth = path.resolve(input)
-
-    return fs.mkdirSync(pth, {
-      mode: options.mode,
-      recursive: true
-    })
-  }
-
-  const make = pth => {
-    try {
-      fs.mkdirSync(pth, options.mode)
-    } catch (error) {
-      if (error.code === 'EPERM') {
-        throw error
-      }
-
-      if (error.code === 'ENOENT') {
-        if (path.dirname(pth) === pth) {
-          throw permissionError(pth)
-        }
-
-        if (error.message.includes('null bytes')) {
-          throw error
-        }
-
-        make(path.dirname(pth))
-        return make(pth)
-      }
-
-      try {
-        if (!fs.statSync(pth).isDirectory()) {
-          // This error is never exposed to the user
-          // it is caught below, and the original error is thrown
-          throw new Error('The path is not a directory')
-        }
-      } catch {
-        throw error
-      }
-    }
-  }
-
-  return make(path.resolve(input))
-}
-
-
-/***/ }),
-
-/***/ 9665:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-module.exports = {
-  moveSync: __nccwpck_require__(6445)
-}
-
-
-/***/ }),
-
-/***/ 6445:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const copySync = __nccwpck_require__(1135).copySync
-const removeSync = __nccwpck_require__(7357).removeSync
-const mkdirpSync = __nccwpck_require__(8605).mkdirpSync
-const stat = __nccwpck_require__(3901)
-
-function moveSync (src, dest, opts) {
-  opts = opts || {}
-  const overwrite = opts.overwrite || opts.clobber || false
-
-  const { srcStat } = stat.checkPathsSync(src, dest, 'move')
-  stat.checkParentPathsSync(src, srcStat, dest, 'move')
-  mkdirpSync(path.dirname(dest))
-  return doRename(src, dest, overwrite)
-}
-
-function doRename (src, dest, overwrite) {
-  if (overwrite) {
-    removeSync(dest)
-    return rename(src, dest, overwrite)
-  }
-  if (fs.existsSync(dest)) throw new Error('dest already exists.')
-  return rename(src, dest, overwrite)
-}
-
-function rename (src, dest, overwrite) {
-  try {
-    fs.renameSync(src, dest)
-  } catch (err) {
-    if (err.code !== 'EXDEV') throw err
-    return moveAcrossDevice(src, dest, overwrite)
-  }
-}
-
-function moveAcrossDevice (src, dest, overwrite) {
-  const opts = {
-    overwrite,
-    errorOnExist: true
-  }
-  copySync(src, dest, opts)
-  return removeSync(src)
-}
-
-module.exports = moveSync
-
-
-/***/ }),
-
-/***/ 1497:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-module.exports = {
-  move: u(__nccwpck_require__(2231))
-}
-
-
-/***/ }),
-
-/***/ 2231:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const copy = __nccwpck_require__(1335).copy
-const remove = __nccwpck_require__(7357).remove
-const mkdirp = __nccwpck_require__(8605).mkdirp
-const pathExists = __nccwpck_require__(3835).pathExists
-const stat = __nccwpck_require__(3901)
-
-function move (src, dest, opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts
-    opts = {}
-  }
-
-  const overwrite = opts.overwrite || opts.clobber || false
-
-  stat.checkPaths(src, dest, 'move', (err, stats) => {
-    if (err) return cb(err)
-    const { srcStat } = stats
-    stat.checkParentPaths(src, srcStat, dest, 'move', err => {
-      if (err) return cb(err)
-      mkdirp(path.dirname(dest), err => {
-        if (err) return cb(err)
-        return doRename(src, dest, overwrite, cb)
-      })
-    })
-  })
-}
-
-function doRename (src, dest, overwrite, cb) {
-  if (overwrite) {
-    return remove(dest, err => {
-      if (err) return cb(err)
-      return rename(src, dest, overwrite, cb)
-    })
-  }
-  pathExists(dest, (err, destExists) => {
-    if (err) return cb(err)
-    if (destExists) return cb(new Error('dest already exists.'))
-    return rename(src, dest, overwrite, cb)
-  })
-}
-
-function rename (src, dest, overwrite, cb) {
-  fs.rename(src, dest, err => {
-    if (!err) return cb()
-    if (err.code !== 'EXDEV') return cb(err)
-    return moveAcrossDevice(src, dest, overwrite, cb)
-  })
-}
-
-function moveAcrossDevice (src, dest, overwrite, cb) {
-  const opts = {
-    overwrite,
-    errorOnExist: true
-  }
-  copy(src, dest, opts, err => {
-    if (err) return cb(err)
-    return remove(src, cb)
-  })
-}
-
-module.exports = move
-
-
-/***/ }),
-
-/***/ 6570:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const mkdir = __nccwpck_require__(8605)
-const pathExists = __nccwpck_require__(3835).pathExists
-
-function outputFile (file, data, encoding, callback) {
-  if (typeof encoding === 'function') {
-    callback = encoding
-    encoding = 'utf8'
-  }
-
-  const dir = path.dirname(file)
-  pathExists(dir, (err, itDoes) => {
-    if (err) return callback(err)
-    if (itDoes) return fs.writeFile(file, data, encoding, callback)
-
-    mkdir.mkdirs(dir, err => {
-      if (err) return callback(err)
-
-      fs.writeFile(file, data, encoding, callback)
-    })
-  })
-}
-
-function outputFileSync (file, ...args) {
-  const dir = path.dirname(file)
-  if (fs.existsSync(dir)) {
-    return fs.writeFileSync(file, ...args)
-  }
-  mkdir.mkdirsSync(dir)
-  fs.writeFileSync(file, ...args)
-}
-
-module.exports = {
-  outputFile: u(outputFile),
-  outputFileSync
-}
-
-
-/***/ }),
-
-/***/ 3835:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-const u = __nccwpck_require__(9046).fromPromise
-const fs = __nccwpck_require__(1176)
-
-function pathExists (path) {
-  return fs.access(path).then(() => true).catch(() => false)
-}
-
-module.exports = {
-  pathExists: u(pathExists),
-  pathExistsSync: fs.existsSync
-}
-
-
-/***/ }),
-
-/***/ 7357:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const u = __nccwpck_require__(9046).fromCallback
-const rimraf = __nccwpck_require__(8761)
-
-module.exports = {
-  remove: u(rimraf),
-  removeSync: rimraf.sync
-}
-
-
-/***/ }),
-
-/***/ 8761:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-const path = __nccwpck_require__(5622)
-const assert = __nccwpck_require__(2357)
-
-const isWindows = (process.platform === 'win32')
-
-function defaults (options) {
-  const methods = [
-    'unlink',
-    'chmod',
-    'stat',
-    'lstat',
-    'rmdir',
-    'readdir'
-  ]
-  methods.forEach(m => {
-    options[m] = options[m] || fs[m]
-    m = m + 'Sync'
-    options[m] = options[m] || fs[m]
-  })
-
-  options.maxBusyTries = options.maxBusyTries || 3
-}
-
-function rimraf (p, options, cb) {
-  let busyTries = 0
-
-  if (typeof options === 'function') {
-    cb = options
-    options = {}
-  }
-
-  assert(p, 'rimraf: missing path')
-  assert.strictEqual(typeof p, 'string', 'rimraf: path should be a string')
-  assert.strictEqual(typeof cb, 'function', 'rimraf: callback function required')
-  assert(options, 'rimraf: invalid options argument provided')
-  assert.strictEqual(typeof options, 'object', 'rimraf: options should be object')
-
-  defaults(options)
-
-  rimraf_(p, options, function CB (er) {
-    if (er) {
-      if ((er.code === 'EBUSY' || er.code === 'ENOTEMPTY' || er.code === 'EPERM') &&
-          busyTries < options.maxBusyTries) {
-        busyTries++
-        const time = busyTries * 100
-        // try again, with the same exact callback as this one.
-        return setTimeout(() => rimraf_(p, options, CB), time)
-      }
-
-      // already gone
-      if (er.code === 'ENOENT') er = null
-    }
-
-    cb(er)
-  })
-}
-
-// Two possible strategies.
-// 1. Assume it's a file.  unlink it, then do the dir stuff on EPERM or EISDIR
-// 2. Assume it's a directory.  readdir, then do the file stuff on ENOTDIR
-//
-// Both result in an extra syscall when you guess wrong.  However, there
-// are likely far more normal files in the world than directories.  This
-// is based on the assumption that a the average number of files per
-// directory is >= 1.
-//
-// If anyone ever complains about this, then I guess the strategy could
-// be made configurable somehow.  But until then, YAGNI.
-function rimraf_ (p, options, cb) {
-  assert(p)
-  assert(options)
-  assert(typeof cb === 'function')
-
-  // sunos lets the root user unlink directories, which is... weird.
-  // so we have to lstat here and make sure it's not a dir.
-  options.lstat(p, (er, st) => {
-    if (er && er.code === 'ENOENT') {
-      return cb(null)
-    }
-
-    // Windows can EPERM on stat.  Life is suffering.
-    if (er && er.code === 'EPERM' && isWindows) {
-      return fixWinEPERM(p, options, er, cb)
-    }
-
-    if (st && st.isDirectory()) {
-      return rmdir(p, options, er, cb)
-    }
-
-    options.unlink(p, er => {
-      if (er) {
-        if (er.code === 'ENOENT') {
-          return cb(null)
-        }
-        if (er.code === 'EPERM') {
-          return (isWindows)
-            ? fixWinEPERM(p, options, er, cb)
-            : rmdir(p, options, er, cb)
-        }
-        if (er.code === 'EISDIR') {
-          return rmdir(p, options, er, cb)
-        }
-      }
-      return cb(er)
-    })
-  })
-}
-
-function fixWinEPERM (p, options, er, cb) {
-  assert(p)
-  assert(options)
-  assert(typeof cb === 'function')
-
-  options.chmod(p, 0o666, er2 => {
-    if (er2) {
-      cb(er2.code === 'ENOENT' ? null : er)
-    } else {
-      options.stat(p, (er3, stats) => {
-        if (er3) {
-          cb(er3.code === 'ENOENT' ? null : er)
-        } else if (stats.isDirectory()) {
-          rmdir(p, options, er, cb)
-        } else {
-          options.unlink(p, cb)
-        }
-      })
-    }
-  })
-}
-
-function fixWinEPERMSync (p, options, er) {
-  let stats
-
-  assert(p)
-  assert(options)
-
-  try {
-    options.chmodSync(p, 0o666)
-  } catch (er2) {
-    if (er2.code === 'ENOENT') {
-      return
-    } else {
-      throw er
-    }
-  }
-
-  try {
-    stats = options.statSync(p)
-  } catch (er3) {
-    if (er3.code === 'ENOENT') {
-      return
-    } else {
-      throw er
-    }
-  }
-
-  if (stats.isDirectory()) {
-    rmdirSync(p, options, er)
-  } else {
-    options.unlinkSync(p)
-  }
-}
-
-function rmdir (p, options, originalEr, cb) {
-  assert(p)
-  assert(options)
-  assert(typeof cb === 'function')
-
-  // try to rmdir first, and only readdir on ENOTEMPTY or EEXIST (SunOS)
-  // if we guessed wrong, and it's not a directory, then
-  // raise the original error.
-  options.rmdir(p, er => {
-    if (er && (er.code === 'ENOTEMPTY' || er.code === 'EEXIST' || er.code === 'EPERM')) {
-      rmkids(p, options, cb)
-    } else if (er && er.code === 'ENOTDIR') {
-      cb(originalEr)
-    } else {
-      cb(er)
-    }
-  })
-}
-
-function rmkids (p, options, cb) {
-  assert(p)
-  assert(options)
-  assert(typeof cb === 'function')
-
-  options.readdir(p, (er, files) => {
-    if (er) return cb(er)
-
-    let n = files.length
-    let errState
-
-    if (n === 0) return options.rmdir(p, cb)
-
-    files.forEach(f => {
-      rimraf(path.join(p, f), options, er => {
-        if (errState) {
-          return
-        }
-        if (er) return cb(errState = er)
-        if (--n === 0) {
-          options.rmdir(p, cb)
-        }
-      })
-    })
-  })
-}
-
-// this looks simpler, and is strictly *faster*, but will
-// tie up the JavaScript thread and fail on excessively
-// deep directory trees.
-function rimrafSync (p, options) {
-  let st
-
-  options = options || {}
-  defaults(options)
-
-  assert(p, 'rimraf: missing path')
-  assert.strictEqual(typeof p, 'string', 'rimraf: path should be a string')
-  assert(options, 'rimraf: missing options')
-  assert.strictEqual(typeof options, 'object', 'rimraf: options should be object')
-
-  try {
-    st = options.lstatSync(p)
-  } catch (er) {
-    if (er.code === 'ENOENT') {
-      return
-    }
-
-    // Windows can EPERM on stat.  Life is suffering.
-    if (er.code === 'EPERM' && isWindows) {
-      fixWinEPERMSync(p, options, er)
-    }
-  }
-
-  try {
-    // sunos lets the root user unlink directories, which is... weird.
-    if (st && st.isDirectory()) {
-      rmdirSync(p, options, null)
-    } else {
-      options.unlinkSync(p)
-    }
-  } catch (er) {
-    if (er.code === 'ENOENT') {
-      return
-    } else if (er.code === 'EPERM') {
-      return isWindows ? fixWinEPERMSync(p, options, er) : rmdirSync(p, options, er)
-    } else if (er.code !== 'EISDIR') {
-      throw er
-    }
-    rmdirSync(p, options, er)
-  }
-}
-
-function rmdirSync (p, options, originalEr) {
-  assert(p)
-  assert(options)
-
-  try {
-    options.rmdirSync(p)
-  } catch (er) {
-    if (er.code === 'ENOTDIR') {
-      throw originalEr
-    } else if (er.code === 'ENOTEMPTY' || er.code === 'EEXIST' || er.code === 'EPERM') {
-      rmkidsSync(p, options)
-    } else if (er.code !== 'ENOENT') {
-      throw er
-    }
-  }
-}
-
-function rmkidsSync (p, options) {
-  assert(p)
-  assert(options)
-  options.readdirSync(p).forEach(f => rimrafSync(path.join(p, f), options))
-
-  if (isWindows) {
-    // We only end up here once we got ENOTEMPTY at least once, and
-    // at this point, we are guaranteed to have removed all the kids.
-    // So, we know that it won't be ENOENT or ENOTDIR or anything else.
-    // try really hard to delete stuff on windows, because it has a
-    // PROFOUNDLY annoying habit of not closing handles promptly when
-    // files are deleted, resulting in spurious ENOTEMPTY errors.
-    const startTime = Date.now()
-    do {
-      try {
-        const ret = options.rmdirSync(p, options)
-        return ret
-      } catch {}
-    } while (Date.now() - startTime < 500) // give up after 500ms
-  } else {
-    const ret = options.rmdirSync(p, options)
-    return ret
-  }
-}
-
-module.exports = rimraf
-rimraf.sync = rimrafSync
-
-
-/***/ }),
-
-/***/ 3901:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(1176)
-const path = __nccwpck_require__(5622)
-const util = __nccwpck_require__(1669)
-const atLeastNode = __nccwpck_require__(5995)
-
-const nodeSupportsBigInt = atLeastNode('10.5.0')
-const stat = (file) => nodeSupportsBigInt ? fs.stat(file, { bigint: true }) : fs.stat(file)
-const statSync = (file) => nodeSupportsBigInt ? fs.statSync(file, { bigint: true }) : fs.statSync(file)
-
-function getStats (src, dest) {
-  return Promise.all([
-    stat(src),
-    stat(dest).catch(err => {
-      if (err.code === 'ENOENT') return null
-      throw err
-    })
-  ]).then(([srcStat, destStat]) => ({ srcStat, destStat }))
-}
-
-function getStatsSync (src, dest) {
-  let destStat
-  const srcStat = statSync(src)
-  try {
-    destStat = statSync(dest)
-  } catch (err) {
-    if (err.code === 'ENOENT') return { srcStat, destStat: null }
-    throw err
-  }
-  return { srcStat, destStat }
-}
-
-function checkPaths (src, dest, funcName, cb) {
-  util.callbackify(getStats)(src, dest, (err, stats) => {
-    if (err) return cb(err)
-    const { srcStat, destStat } = stats
-    if (destStat && areIdentical(srcStat, destStat)) {
-      return cb(new Error('Source and destination must not be the same.'))
-    }
-    if (srcStat.isDirectory() && isSrcSubdir(src, dest)) {
-      return cb(new Error(errMsg(src, dest, funcName)))
-    }
-    return cb(null, { srcStat, destStat })
-  })
-}
-
-function checkPathsSync (src, dest, funcName) {
-  const { srcStat, destStat } = getStatsSync(src, dest)
-  if (destStat && areIdentical(srcStat, destStat)) {
-    throw new Error('Source and destination must not be the same.')
-  }
-  if (srcStat.isDirectory() && isSrcSubdir(src, dest)) {
-    throw new Error(errMsg(src, dest, funcName))
-  }
-  return { srcStat, destStat }
-}
-
-// recursively check if dest parent is a subdirectory of src.
-// It works for all file types including symlinks since it
-// checks the src and dest inodes. It starts from the deepest
-// parent and stops once it reaches the src parent or the root path.
-function checkParentPaths (src, srcStat, dest, funcName, cb) {
-  const srcParent = path.resolve(path.dirname(src))
-  const destParent = path.resolve(path.dirname(dest))
-  if (destParent === srcParent || destParent === path.parse(destParent).root) return cb()
-  const callback = (err, destStat) => {
-    if (err) {
-      if (err.code === 'ENOENT') return cb()
-      return cb(err)
-    }
-    if (areIdentical(srcStat, destStat)) {
-      return cb(new Error(errMsg(src, dest, funcName)))
-    }
-    return checkParentPaths(src, srcStat, destParent, funcName, cb)
-  }
-  if (nodeSupportsBigInt) fs.stat(destParent, { bigint: true }, callback)
-  else fs.stat(destParent, callback)
-}
-
-function checkParentPathsSync (src, srcStat, dest, funcName) {
-  const srcParent = path.resolve(path.dirname(src))
-  const destParent = path.resolve(path.dirname(dest))
-  if (destParent === srcParent || destParent === path.parse(destParent).root) return
-  let destStat
-  try {
-    destStat = statSync(destParent)
-  } catch (err) {
-    if (err.code === 'ENOENT') return
-    throw err
-  }
-  if (areIdentical(srcStat, destStat)) {
-    throw new Error(errMsg(src, dest, funcName))
-  }
-  return checkParentPathsSync(src, srcStat, destParent, funcName)
-}
-
-function areIdentical (srcStat, destStat) {
-  if (destStat.ino && destStat.dev && destStat.ino === srcStat.ino && destStat.dev === srcStat.dev) {
-    if (nodeSupportsBigInt || destStat.ino < Number.MAX_SAFE_INTEGER) {
-      // definitive answer
-      return true
-    }
-    // Use additional heuristics if we can't use 'bigint'.
-    // Different 'ino' could be represented the same if they are >= Number.MAX_SAFE_INTEGER
-    // See issue 657
-    if (destStat.size === srcStat.size &&
-        destStat.mode === srcStat.mode &&
-        destStat.nlink === srcStat.nlink &&
-        destStat.atimeMs === srcStat.atimeMs &&
-        destStat.mtimeMs === srcStat.mtimeMs &&
-        destStat.ctimeMs === srcStat.ctimeMs &&
-        destStat.birthtimeMs === srcStat.birthtimeMs) {
-      // heuristic answer
-      return true
-    }
-  }
-  return false
-}
-
-// return true if dest is a subdir of src, otherwise false.
-// It only checks the path strings.
-function isSrcSubdir (src, dest) {
-  const srcArr = path.resolve(src).split(path.sep).filter(i => i)
-  const destArr = path.resolve(dest).split(path.sep).filter(i => i)
-  return srcArr.reduce((acc, cur, i) => acc && destArr[i] === cur, true)
-}
-
-function errMsg (src, dest, funcName) {
-  return `Cannot ${funcName} '${src}' to a subdirectory of itself, '${dest}'.`
-}
-
-module.exports = {
-  checkPaths,
-  checkPathsSync,
-  checkParentPaths,
-  checkParentPathsSync,
-  isSrcSubdir
-}
-
-
-/***/ }),
-
-/***/ 2548:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const fs = __nccwpck_require__(7758)
-
-function utimesMillis (path, atime, mtime, callback) {
-  // if (!HAS_MILLIS_RES) return fs.utimes(path, atime, mtime, callback)
-  fs.open(path, 'r+', (err, fd) => {
-    if (err) return callback(err)
-    fs.futimes(fd, atime, mtime, futimesErr => {
-      fs.close(fd, closeErr => {
-        if (callback) callback(futimesErr || closeErr)
-      })
-    })
-  })
-}
-
-function utimesMillisSync (path, atime, mtime) {
-  const fd = fs.openSync(path, 'r+')
-  fs.futimesSync(fd, atime, mtime)
-  return fs.closeSync(fd)
-}
-
-module.exports = {
-  utimesMillis,
-  utimesMillisSync
-}
-
-
-/***/ }),
-
 /***/ 6917:
 /***/ ((module) => {
 
@@ -14382,895 +13463,6 @@ module.exports = function getIterator (obj) {
     }
   }
   throw new Error('argument is not an iterator or iterable')
-}
-
-
-/***/ }),
-
-/***/ 7356:
-/***/ ((module) => {
-
-"use strict";
-
-
-module.exports = clone
-
-var getPrototypeOf = Object.getPrototypeOf || function (obj) {
-  return obj.__proto__
-}
-
-function clone (obj) {
-  if (obj === null || typeof obj !== 'object')
-    return obj
-
-  if (obj instanceof Object)
-    var copy = { __proto__: getPrototypeOf(obj) }
-  else
-    var copy = Object.create(null)
-
-  Object.getOwnPropertyNames(obj).forEach(function (key) {
-    Object.defineProperty(copy, key, Object.getOwnPropertyDescriptor(obj, key))
-  })
-
-  return copy
-}
-
-
-/***/ }),
-
-/***/ 7758:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-var fs = __nccwpck_require__(5747)
-var polyfills = __nccwpck_require__(263)
-var legacy = __nccwpck_require__(3086)
-var clone = __nccwpck_require__(7356)
-
-var util = __nccwpck_require__(1669)
-
-/* istanbul ignore next - node 0.x polyfill */
-var gracefulQueue
-var previousSymbol
-
-/* istanbul ignore else - node 0.x polyfill */
-if (typeof Symbol === 'function' && typeof Symbol.for === 'function') {
-  gracefulQueue = Symbol.for('graceful-fs.queue')
-  // This is used in testing by future versions
-  previousSymbol = Symbol.for('graceful-fs.previous')
-} else {
-  gracefulQueue = '___graceful-fs.queue'
-  previousSymbol = '___graceful-fs.previous'
-}
-
-function noop () {}
-
-function publishQueue(context, queue) {
-  Object.defineProperty(context, gracefulQueue, {
-    get: function() {
-      return queue
-    }
-  })
-}
-
-var debug = noop
-if (util.debuglog)
-  debug = util.debuglog('gfs4')
-else if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || ''))
-  debug = function() {
-    var m = util.format.apply(util, arguments)
-    m = 'GFS4: ' + m.split(/\n/).join('\nGFS4: ')
-    console.error(m)
-  }
-
-// Once time initialization
-if (!fs[gracefulQueue]) {
-  // This queue can be shared by multiple loaded instances
-  var queue = global[gracefulQueue] || []
-  publishQueue(fs, queue)
-
-  // Patch fs.close/closeSync to shared queue version, because we need
-  // to retry() whenever a close happens *anywhere* in the program.
-  // This is essential when multiple graceful-fs instances are
-  // in play at the same time.
-  fs.close = (function (fs$close) {
-    function close (fd, cb) {
-      return fs$close.call(fs, fd, function (err) {
-        // This function uses the graceful-fs shared queue
-        if (!err) {
-          retry()
-        }
-
-        if (typeof cb === 'function')
-          cb.apply(this, arguments)
-      })
-    }
-
-    Object.defineProperty(close, previousSymbol, {
-      value: fs$close
-    })
-    return close
-  })(fs.close)
-
-  fs.closeSync = (function (fs$closeSync) {
-    function closeSync (fd) {
-      // This function uses the graceful-fs shared queue
-      fs$closeSync.apply(fs, arguments)
-      retry()
-    }
-
-    Object.defineProperty(closeSync, previousSymbol, {
-      value: fs$closeSync
-    })
-    return closeSync
-  })(fs.closeSync)
-
-  if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || '')) {
-    process.on('exit', function() {
-      debug(fs[gracefulQueue])
-      __nccwpck_require__(2357).equal(fs[gracefulQueue].length, 0)
-    })
-  }
-}
-
-if (!global[gracefulQueue]) {
-  publishQueue(global, fs[gracefulQueue]);
-}
-
-module.exports = patch(clone(fs))
-if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs.__patched) {
-    module.exports = patch(fs)
-    fs.__patched = true;
-}
-
-function patch (fs) {
-  // Everything that references the open() function needs to be in here
-  polyfills(fs)
-  fs.gracefulify = patch
-
-  fs.createReadStream = createReadStream
-  fs.createWriteStream = createWriteStream
-  var fs$readFile = fs.readFile
-  fs.readFile = readFile
-  function readFile (path, options, cb) {
-    if (typeof options === 'function')
-      cb = options, options = null
-
-    return go$readFile(path, options, cb)
-
-    function go$readFile (path, options, cb) {
-      return fs$readFile(path, options, function (err) {
-        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-          enqueue([go$readFile, [path, options, cb]])
-        else {
-          if (typeof cb === 'function')
-            cb.apply(this, arguments)
-          retry()
-        }
-      })
-    }
-  }
-
-  var fs$writeFile = fs.writeFile
-  fs.writeFile = writeFile
-  function writeFile (path, data, options, cb) {
-    if (typeof options === 'function')
-      cb = options, options = null
-
-    return go$writeFile(path, data, options, cb)
-
-    function go$writeFile (path, data, options, cb) {
-      return fs$writeFile(path, data, options, function (err) {
-        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-          enqueue([go$writeFile, [path, data, options, cb]])
-        else {
-          if (typeof cb === 'function')
-            cb.apply(this, arguments)
-          retry()
-        }
-      })
-    }
-  }
-
-  var fs$appendFile = fs.appendFile
-  if (fs$appendFile)
-    fs.appendFile = appendFile
-  function appendFile (path, data, options, cb) {
-    if (typeof options === 'function')
-      cb = options, options = null
-
-    return go$appendFile(path, data, options, cb)
-
-    function go$appendFile (path, data, options, cb) {
-      return fs$appendFile(path, data, options, function (err) {
-        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-          enqueue([go$appendFile, [path, data, options, cb]])
-        else {
-          if (typeof cb === 'function')
-            cb.apply(this, arguments)
-          retry()
-        }
-      })
-    }
-  }
-
-  var fs$copyFile = fs.copyFile
-  if (fs$copyFile)
-    fs.copyFile = copyFile
-  function copyFile (src, dest, flags, cb) {
-    if (typeof flags === 'function') {
-      cb = flags
-      flags = 0
-    }
-    return fs$copyFile(src, dest, flags, function (err) {
-      if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-        enqueue([fs$copyFile, [src, dest, flags, cb]])
-      else {
-        if (typeof cb === 'function')
-          cb.apply(this, arguments)
-        retry()
-      }
-    })
-  }
-
-  var fs$readdir = fs.readdir
-  fs.readdir = readdir
-  function readdir (path, options, cb) {
-    var args = [path]
-    if (typeof options !== 'function') {
-      args.push(options)
-    } else {
-      cb = options
-    }
-    args.push(go$readdir$cb)
-
-    return go$readdir(args)
-
-    function go$readdir$cb (err, files) {
-      if (files && files.sort)
-        files.sort()
-
-      if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-        enqueue([go$readdir, [args]])
-
-      else {
-        if (typeof cb === 'function')
-          cb.apply(this, arguments)
-        retry()
-      }
-    }
-  }
-
-  function go$readdir (args) {
-    return fs$readdir.apply(fs, args)
-  }
-
-  if (process.version.substr(0, 4) === 'v0.8') {
-    var legStreams = legacy(fs)
-    ReadStream = legStreams.ReadStream
-    WriteStream = legStreams.WriteStream
-  }
-
-  var fs$ReadStream = fs.ReadStream
-  if (fs$ReadStream) {
-    ReadStream.prototype = Object.create(fs$ReadStream.prototype)
-    ReadStream.prototype.open = ReadStream$open
-  }
-
-  var fs$WriteStream = fs.WriteStream
-  if (fs$WriteStream) {
-    WriteStream.prototype = Object.create(fs$WriteStream.prototype)
-    WriteStream.prototype.open = WriteStream$open
-  }
-
-  Object.defineProperty(fs, 'ReadStream', {
-    get: function () {
-      return ReadStream
-    },
-    set: function (val) {
-      ReadStream = val
-    },
-    enumerable: true,
-    configurable: true
-  })
-  Object.defineProperty(fs, 'WriteStream', {
-    get: function () {
-      return WriteStream
-    },
-    set: function (val) {
-      WriteStream = val
-    },
-    enumerable: true,
-    configurable: true
-  })
-
-  // legacy names
-  var FileReadStream = ReadStream
-  Object.defineProperty(fs, 'FileReadStream', {
-    get: function () {
-      return FileReadStream
-    },
-    set: function (val) {
-      FileReadStream = val
-    },
-    enumerable: true,
-    configurable: true
-  })
-  var FileWriteStream = WriteStream
-  Object.defineProperty(fs, 'FileWriteStream', {
-    get: function () {
-      return FileWriteStream
-    },
-    set: function (val) {
-      FileWriteStream = val
-    },
-    enumerable: true,
-    configurable: true
-  })
-
-  function ReadStream (path, options) {
-    if (this instanceof ReadStream)
-      return fs$ReadStream.apply(this, arguments), this
-    else
-      return ReadStream.apply(Object.create(ReadStream.prototype), arguments)
-  }
-
-  function ReadStream$open () {
-    var that = this
-    open(that.path, that.flags, that.mode, function (err, fd) {
-      if (err) {
-        if (that.autoClose)
-          that.destroy()
-
-        that.emit('error', err)
-      } else {
-        that.fd = fd
-        that.emit('open', fd)
-        that.read()
-      }
-    })
-  }
-
-  function WriteStream (path, options) {
-    if (this instanceof WriteStream)
-      return fs$WriteStream.apply(this, arguments), this
-    else
-      return WriteStream.apply(Object.create(WriteStream.prototype), arguments)
-  }
-
-  function WriteStream$open () {
-    var that = this
-    open(that.path, that.flags, that.mode, function (err, fd) {
-      if (err) {
-        that.destroy()
-        that.emit('error', err)
-      } else {
-        that.fd = fd
-        that.emit('open', fd)
-      }
-    })
-  }
-
-  function createReadStream (path, options) {
-    return new fs.ReadStream(path, options)
-  }
-
-  function createWriteStream (path, options) {
-    return new fs.WriteStream(path, options)
-  }
-
-  var fs$open = fs.open
-  fs.open = open
-  function open (path, flags, mode, cb) {
-    if (typeof mode === 'function')
-      cb = mode, mode = null
-
-    return go$open(path, flags, mode, cb)
-
-    function go$open (path, flags, mode, cb) {
-      return fs$open(path, flags, mode, function (err, fd) {
-        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
-          enqueue([go$open, [path, flags, mode, cb]])
-        else {
-          if (typeof cb === 'function')
-            cb.apply(this, arguments)
-          retry()
-        }
-      })
-    }
-  }
-
-  return fs
-}
-
-function enqueue (elem) {
-  debug('ENQUEUE', elem[0].name, elem[1])
-  fs[gracefulQueue].push(elem)
-}
-
-function retry () {
-  var elem = fs[gracefulQueue].shift()
-  if (elem) {
-    debug('RETRY', elem[0].name, elem[1])
-    elem[0].apply(null, elem[1])
-  }
-}
-
-
-/***/ }),
-
-/***/ 3086:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-var Stream = __nccwpck_require__(2413).Stream
-
-module.exports = legacy
-
-function legacy (fs) {
-  return {
-    ReadStream: ReadStream,
-    WriteStream: WriteStream
-  }
-
-  function ReadStream (path, options) {
-    if (!(this instanceof ReadStream)) return new ReadStream(path, options);
-
-    Stream.call(this);
-
-    var self = this;
-
-    this.path = path;
-    this.fd = null;
-    this.readable = true;
-    this.paused = false;
-
-    this.flags = 'r';
-    this.mode = 438; /*=0666*/
-    this.bufferSize = 64 * 1024;
-
-    options = options || {};
-
-    // Mixin options into this
-    var keys = Object.keys(options);
-    for (var index = 0, length = keys.length; index < length; index++) {
-      var key = keys[index];
-      this[key] = options[key];
-    }
-
-    if (this.encoding) this.setEncoding(this.encoding);
-
-    if (this.start !== undefined) {
-      if ('number' !== typeof this.start) {
-        throw TypeError('start must be a Number');
-      }
-      if (this.end === undefined) {
-        this.end = Infinity;
-      } else if ('number' !== typeof this.end) {
-        throw TypeError('end must be a Number');
-      }
-
-      if (this.start > this.end) {
-        throw new Error('start must be <= end');
-      }
-
-      this.pos = this.start;
-    }
-
-    if (this.fd !== null) {
-      process.nextTick(function() {
-        self._read();
-      });
-      return;
-    }
-
-    fs.open(this.path, this.flags, this.mode, function (err, fd) {
-      if (err) {
-        self.emit('error', err);
-        self.readable = false;
-        return;
-      }
-
-      self.fd = fd;
-      self.emit('open', fd);
-      self._read();
-    })
-  }
-
-  function WriteStream (path, options) {
-    if (!(this instanceof WriteStream)) return new WriteStream(path, options);
-
-    Stream.call(this);
-
-    this.path = path;
-    this.fd = null;
-    this.writable = true;
-
-    this.flags = 'w';
-    this.encoding = 'binary';
-    this.mode = 438; /*=0666*/
-    this.bytesWritten = 0;
-
-    options = options || {};
-
-    // Mixin options into this
-    var keys = Object.keys(options);
-    for (var index = 0, length = keys.length; index < length; index++) {
-      var key = keys[index];
-      this[key] = options[key];
-    }
-
-    if (this.start !== undefined) {
-      if ('number' !== typeof this.start) {
-        throw TypeError('start must be a Number');
-      }
-      if (this.start < 0) {
-        throw new Error('start must be >= zero');
-      }
-
-      this.pos = this.start;
-    }
-
-    this.busy = false;
-    this._queue = [];
-
-    if (this.fd === null) {
-      this._open = fs.open;
-      this._queue.push([this._open, this.path, this.flags, this.mode, undefined]);
-      this.flush();
-    }
-  }
-}
-
-
-/***/ }),
-
-/***/ 263:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-var constants = __nccwpck_require__(7619)
-
-var origCwd = process.cwd
-var cwd = null
-
-var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform
-
-process.cwd = function() {
-  if (!cwd)
-    cwd = origCwd.call(process)
-  return cwd
-}
-try {
-  process.cwd()
-} catch (er) {}
-
-// This check is needed until node.js 12 is required
-if (typeof process.chdir === 'function') {
-  var chdir = process.chdir
-  process.chdir = function (d) {
-    cwd = null
-    chdir.call(process, d)
-  }
-  if (Object.setPrototypeOf) Object.setPrototypeOf(process.chdir, chdir)
-}
-
-module.exports = patch
-
-function patch (fs) {
-  // (re-)implement some things that are known busted or missing.
-
-  // lchmod, broken prior to 0.6.2
-  // back-port the fix here.
-  if (constants.hasOwnProperty('O_SYMLINK') &&
-      process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
-    patchLchmod(fs)
-  }
-
-  // lutimes implementation, or no-op
-  if (!fs.lutimes) {
-    patchLutimes(fs)
-  }
-
-  // https://github.com/isaacs/node-graceful-fs/issues/4
-  // Chown should not fail on einval or eperm if non-root.
-  // It should not fail on enosys ever, as this just indicates
-  // that a fs doesn't support the intended operation.
-
-  fs.chown = chownFix(fs.chown)
-  fs.fchown = chownFix(fs.fchown)
-  fs.lchown = chownFix(fs.lchown)
-
-  fs.chmod = chmodFix(fs.chmod)
-  fs.fchmod = chmodFix(fs.fchmod)
-  fs.lchmod = chmodFix(fs.lchmod)
-
-  fs.chownSync = chownFixSync(fs.chownSync)
-  fs.fchownSync = chownFixSync(fs.fchownSync)
-  fs.lchownSync = chownFixSync(fs.lchownSync)
-
-  fs.chmodSync = chmodFixSync(fs.chmodSync)
-  fs.fchmodSync = chmodFixSync(fs.fchmodSync)
-  fs.lchmodSync = chmodFixSync(fs.lchmodSync)
-
-  fs.stat = statFix(fs.stat)
-  fs.fstat = statFix(fs.fstat)
-  fs.lstat = statFix(fs.lstat)
-
-  fs.statSync = statFixSync(fs.statSync)
-  fs.fstatSync = statFixSync(fs.fstatSync)
-  fs.lstatSync = statFixSync(fs.lstatSync)
-
-  // if lchmod/lchown do not exist, then make them no-ops
-  if (!fs.lchmod) {
-    fs.lchmod = function (path, mode, cb) {
-      if (cb) process.nextTick(cb)
-    }
-    fs.lchmodSync = function () {}
-  }
-  if (!fs.lchown) {
-    fs.lchown = function (path, uid, gid, cb) {
-      if (cb) process.nextTick(cb)
-    }
-    fs.lchownSync = function () {}
-  }
-
-  // on Windows, A/V software can lock the directory, causing this
-  // to fail with an EACCES or EPERM if the directory contains newly
-  // created files.  Try again on failure, for up to 60 seconds.
-
-  // Set the timeout this long because some Windows Anti-Virus, such as Parity
-  // bit9, may lock files for up to a minute, causing npm package install
-  // failures. Also, take care to yield the scheduler. Windows scheduling gives
-  // CPU to a busy looping process, which can cause the program causing the lock
-  // contention to be starved of CPU by node, so the contention doesn't resolve.
-  if (platform === "win32") {
-    fs.rename = (function (fs$rename) { return function (from, to, cb) {
-      var start = Date.now()
-      var backoff = 0;
-      fs$rename(from, to, function CB (er) {
-        if (er
-            && (er.code === "EACCES" || er.code === "EPERM")
-            && Date.now() - start < 60000) {
-          setTimeout(function() {
-            fs.stat(to, function (stater, st) {
-              if (stater && stater.code === "ENOENT")
-                fs$rename(from, to, CB);
-              else
-                cb(er)
-            })
-          }, backoff)
-          if (backoff < 100)
-            backoff += 10;
-          return;
-        }
-        if (cb) cb(er)
-      })
-    }})(fs.rename)
-  }
-
-  // if read() returns EAGAIN, then just try it again.
-  fs.read = (function (fs$read) {
-    function read (fd, buffer, offset, length, position, callback_) {
-      var callback
-      if (callback_ && typeof callback_ === 'function') {
-        var eagCounter = 0
-        callback = function (er, _, __) {
-          if (er && er.code === 'EAGAIN' && eagCounter < 10) {
-            eagCounter ++
-            return fs$read.call(fs, fd, buffer, offset, length, position, callback)
-          }
-          callback_.apply(this, arguments)
-        }
-      }
-      return fs$read.call(fs, fd, buffer, offset, length, position, callback)
-    }
-
-    // This ensures `util.promisify` works as it does for native `fs.read`.
-    if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read)
-    return read
-  })(fs.read)
-
-  fs.readSync = (function (fs$readSync) { return function (fd, buffer, offset, length, position) {
-    var eagCounter = 0
-    while (true) {
-      try {
-        return fs$readSync.call(fs, fd, buffer, offset, length, position)
-      } catch (er) {
-        if (er.code === 'EAGAIN' && eagCounter < 10) {
-          eagCounter ++
-          continue
-        }
-        throw er
-      }
-    }
-  }})(fs.readSync)
-
-  function patchLchmod (fs) {
-    fs.lchmod = function (path, mode, callback) {
-      fs.open( path
-             , constants.O_WRONLY | constants.O_SYMLINK
-             , mode
-             , function (err, fd) {
-        if (err) {
-          if (callback) callback(err)
-          return
-        }
-        // prefer to return the chmod error, if one occurs,
-        // but still try to close, and report closing errors if they occur.
-        fs.fchmod(fd, mode, function (err) {
-          fs.close(fd, function(err2) {
-            if (callback) callback(err || err2)
-          })
-        })
-      })
-    }
-
-    fs.lchmodSync = function (path, mode) {
-      var fd = fs.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode)
-
-      // prefer to return the chmod error, if one occurs,
-      // but still try to close, and report closing errors if they occur.
-      var threw = true
-      var ret
-      try {
-        ret = fs.fchmodSync(fd, mode)
-        threw = false
-      } finally {
-        if (threw) {
-          try {
-            fs.closeSync(fd)
-          } catch (er) {}
-        } else {
-          fs.closeSync(fd)
-        }
-      }
-      return ret
-    }
-  }
-
-  function patchLutimes (fs) {
-    if (constants.hasOwnProperty("O_SYMLINK")) {
-      fs.lutimes = function (path, at, mt, cb) {
-        fs.open(path, constants.O_SYMLINK, function (er, fd) {
-          if (er) {
-            if (cb) cb(er)
-            return
-          }
-          fs.futimes(fd, at, mt, function (er) {
-            fs.close(fd, function (er2) {
-              if (cb) cb(er || er2)
-            })
-          })
-        })
-      }
-
-      fs.lutimesSync = function (path, at, mt) {
-        var fd = fs.openSync(path, constants.O_SYMLINK)
-        var ret
-        var threw = true
-        try {
-          ret = fs.futimesSync(fd, at, mt)
-          threw = false
-        } finally {
-          if (threw) {
-            try {
-              fs.closeSync(fd)
-            } catch (er) {}
-          } else {
-            fs.closeSync(fd)
-          }
-        }
-        return ret
-      }
-
-    } else {
-      fs.lutimes = function (_a, _b, _c, cb) { if (cb) process.nextTick(cb) }
-      fs.lutimesSync = function () {}
-    }
-  }
-
-  function chmodFix (orig) {
-    if (!orig) return orig
-    return function (target, mode, cb) {
-      return orig.call(fs, target, mode, function (er) {
-        if (chownErOk(er)) er = null
-        if (cb) cb.apply(this, arguments)
-      })
-    }
-  }
-
-  function chmodFixSync (orig) {
-    if (!orig) return orig
-    return function (target, mode) {
-      try {
-        return orig.call(fs, target, mode)
-      } catch (er) {
-        if (!chownErOk(er)) throw er
-      }
-    }
-  }
-
-
-  function chownFix (orig) {
-    if (!orig) return orig
-    return function (target, uid, gid, cb) {
-      return orig.call(fs, target, uid, gid, function (er) {
-        if (chownErOk(er)) er = null
-        if (cb) cb.apply(this, arguments)
-      })
-    }
-  }
-
-  function chownFixSync (orig) {
-    if (!orig) return orig
-    return function (target, uid, gid) {
-      try {
-        return orig.call(fs, target, uid, gid)
-      } catch (er) {
-        if (!chownErOk(er)) throw er
-      }
-    }
-  }
-
-  function statFix (orig) {
-    if (!orig) return orig
-    // Older versions of Node erroneously returned signed integers for
-    // uid + gid.
-    return function (target, options, cb) {
-      if (typeof options === 'function') {
-        cb = options
-        options = null
-      }
-      function callback (er, stats) {
-        if (stats) {
-          if (stats.uid < 0) stats.uid += 0x100000000
-          if (stats.gid < 0) stats.gid += 0x100000000
-        }
-        if (cb) cb.apply(this, arguments)
-      }
-      return options ? orig.call(fs, target, options, callback)
-        : orig.call(fs, target, callback)
-    }
-  }
-
-  function statFixSync (orig) {
-    if (!orig) return orig
-    // Older versions of Node erroneously returned signed integers for
-    // uid + gid.
-    return function (target, options) {
-      var stats = options ? orig.call(fs, target, options)
-        : orig.call(fs, target)
-      if (stats.uid < 0) stats.uid += 0x100000000
-      if (stats.gid < 0) stats.gid += 0x100000000
-      return stats;
-    }
-  }
-
-  // ENOSYS means that the fs doesn't support the op. Just ignore
-  // that, because it doesn't matter.
-  //
-  // if there's no getuid, or if getuid() is something other
-  // than 0, and the error is EINVAL or EPERM, then just ignore
-  // it.
-  //
-  // This specific case is a silent failure in cp, install, tar,
-  // and most other unix tools that manage permissions.
-  //
-  // When running as root, or if other types of errors are
-  // encountered, then it's strict.
-  function chownErOk (er) {
-    if (!er)
-      return true
-
-    if (er.code === "ENOSYS")
-      return true
-
-    var nonroot = !process.getuid || process.getuid() !== 0
-    if (nonroot) {
-      if (er.code === "EINVAL" || er.code === "EPERM")
-        return true
-    }
-
-    return false
-  }
 }
 
 
@@ -16054,7 +14246,19 @@ module.exports = {
     'big5hkscs': {
         type: '_dbcs',
         table: function() { return __nccwpck_require__(3104).concat(__nccwpck_require__(3612)) },
-        encodeSkipVals: [0xa2cc],
+        encodeSkipVals: [
+            // Although Encoding Standard says we should avoid encoding to HKSCS area (See Step 1 of
+            // https://encoding.spec.whatwg.org/#index-big5-pointer), we still do it to increase compatibility with ICU.
+            // But if a single unicode point can be encoded both as HKSCS and regular Big5, we prefer the latter.
+            0x8e69, 0x8e6f, 0x8e7e, 0x8eab, 0x8eb4, 0x8ecd, 0x8ed0, 0x8f57, 0x8f69, 0x8f6e, 0x8fcb, 0x8ffe,
+            0x906d, 0x907a, 0x90c4, 0x90dc, 0x90f1, 0x91bf, 0x92af, 0x92b0, 0x92b1, 0x92b2, 0x92d1, 0x9447, 0x94ca,
+            0x95d9, 0x96fc, 0x9975, 0x9b76, 0x9b78, 0x9b7b, 0x9bc6, 0x9bde, 0x9bec, 0x9bf6, 0x9c42, 0x9c53, 0x9c62,
+            0x9c68, 0x9c6b, 0x9c77, 0x9cbc, 0x9cbd, 0x9cd0, 0x9d57, 0x9d5a, 0x9dc4, 0x9def, 0x9dfb, 0x9ea9, 0x9eef,
+            0x9efd, 0x9f60, 0x9fcb, 0xa077, 0xa0dc, 0xa0df, 0x8fcc, 0x92c8, 0x9644, 0x96ed,
+
+            // Step 2 of https://encoding.spec.whatwg.org/#index-big5-pointer: Use last pointer for U+2550, U+255E, U+2561, U+256A, U+5341, or U+5345
+            0xa2a4, 0xa2a5, 0xa2a7, 0xa2a6, 0xa2cc, 0xa2ce,
+        ],
     },
 
     'cnbig5': 'big5hkscs',
@@ -18366,6 +16570,11 @@ const normaliseContent = __nccwpck_require__(2384)
 const normaliseInput = __nccwpck_require__(649)
 
 /**
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidateStream} ImportCandidateStream
+ * @typedef {import('ipfs-core-types/src/utils').BrowserImportCandidate} BrowserImportCandidate
+ */
+
+/**
  * Transforms any of the `ipfs.add` input types into
  *
  * ```
@@ -18374,9 +16583,10 @@ const normaliseInput = __nccwpck_require__(649)
  *
  * See https://github.com/ipfs/js-ipfs/blob/master/docs/core-api/FILES.md#ipfsadddata-options
  *
- * @param {import('ipfs-core-types/src/files').ImportSource} input
- * @returns {AsyncIterable<import('ipfs-core-types/src/files').Entry<Blob>>}
+ * @param {ImportCandidateStream} input
+ * @returns {AsyncGenerator<BrowserImportCandidate, void, undefined>}
  */
+// @ts-ignore
 module.exports = (input) => normaliseInput(input, normaliseContent)
 
 
@@ -18392,16 +16602,21 @@ const normaliseContent = __nccwpck_require__(1168)
 const normaliseInput = __nccwpck_require__(649)
 
 /**
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidateStream} ImportCandidateStream
+ * @typedef {import('ipfs-unixfs-importer').ImportCandidate} ImportCandidate
+ */
+
+/**
  * Transforms any of the `ipfs.add` input types into
  *
  * ```
- * AsyncIterable<{ path, mode, mtime, content: AsyncIterable<Buffer> }>
+ * AsyncIterable<{ path, mode, mtime, content: AsyncIterable<Uint8Array> }>
  * ```
  *
  * See https://github.com/ipfs/js-ipfs/blob/master/docs/core-api/FILES.md#ipfsadddata-options
  *
- * @param {import('ipfs-core-types/src/files').ImportSource} input
- * @returns {AsyncIterable<import('ipfs-core-types/src/files').Entry<AsyncIterable<Uint8Array>>>}
+ * @param {ImportCandidateStream} input
+ * @returns {AsyncGenerator<ImportCandidate, void, undefined>}
  */
 module.exports = (input) => normaliseInput(input, normaliseContent)
 
@@ -18427,7 +16642,6 @@ const {
 
 /**
  * @param {import('./normalise-input').ToContent} input
- * @returns {Promise<Blob>}
  */
 async function toBlob (input) {
   // Bytes
@@ -18451,7 +16665,7 @@ async function toBlob (input) {
   }
 
   // (Async)Iterator<?>
-  if (input[Symbol.iterator] || input[Symbol.asyncIterator]) {
+  if (Symbol.iterator in input || Symbol.asyncIterator in input) {
     /** @type {any} peekable */
     const peekable = itPeekable(input)
 
@@ -18481,7 +16695,6 @@ async function toBlob (input) {
 
 /**
  * @param {AsyncIterable<BlobPart>|Iterable<BlobPart>} stream
- * @returns {Promise<Blob>}
  */
 async function itToBlob (stream) {
   const parts = []
@@ -18519,7 +16732,6 @@ const {
 
 /**
  * @param {import('./normalise-input').ToContent} input
- * @returns {AsyncIterable<Uint8Array>}
  */
 async function * toAsyncIterable (input) {
   // Bytes | String
@@ -18545,7 +16757,7 @@ async function * toAsyncIterable (input) {
   }
 
   // (Async)Iterator<?>
-  if (input[Symbol.iterator] || input[Symbol.asyncIterator]) {
+  if (Symbol.iterator in input || Symbol.asyncIterator in input) {
     /** @type {any} peekable */
     const peekable = itPeekable(input)
 
@@ -18577,9 +16789,7 @@ async function * toAsyncIterable (input) {
 }
 
 /**
- *
  * @param {ArrayBuffer | ArrayBufferView | string | InstanceType<typeof window.String> | number[]} chunk
- * @returns {Uint8Array}
  */
 function toBytes (chunk) {
   if (chunk instanceof Uint8Array) {
@@ -18620,27 +16830,27 @@ const {
   isBytes,
   isBlob,
   isReadableStream,
-  isFileObject,
-  mtimeToObject,
-  modeToNumber
+  isFileObject
 } = __nccwpck_require__(5130)
-
-// eslint-disable-next-line complexity
+const {
+  parseMtime,
+  parseMode
+} = __nccwpck_require__(9811)
 
 /**
- * @typedef {import('ipfs-core-types/src/files').ToContent} ToContent
+ * @typedef {import('ipfs-core-types/src/utils').ToContent} ToContent
+ * @typedef {import('ipfs-unixfs-importer').ImportCandidate} ImporterImportCandidate
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidate} ImportCandidate
  */
+
 /**
- * @template {Blob|AsyncIterable<Uint8Array>} Content
- * @param {import('ipfs-core-types/src/files').ImportSource} input
- * @param {(content:ToContent) => Content|Promise<Content>} normaliseContent
- * @returns {AsyncIterable<import('ipfs-core-types/src/files').Entry<Content>>}
+ * @param {import('ipfs-core-types/src/utils').ImportCandidateStream} input
+ * @param {(content:ToContent) => AsyncIterable<Uint8Array>} normaliseContent
  */
 // eslint-disable-next-line complexity
 module.exports = async function * normaliseInput (input, normaliseContent) {
-  // must give us something
   if (input === null || input === undefined) {
-    throw errCode(new Error(`Unexpected input: ${input}`), 'ERR_UNEXPECTED_INPUT')
+    return
   }
 
   // String
@@ -18662,7 +16872,7 @@ module.exports = async function * normaliseInput (input, normaliseContent) {
   }
 
   // Iterable<?>
-  if (input[Symbol.iterator] || input[Symbol.asyncIterator]) {
+  if (Symbol.iterator in input || Symbol.asyncIterator in input) {
     /** @type {any} peekable */
     const peekable = itPeekable(input)
 
@@ -18688,7 +16898,7 @@ module.exports = async function * normaliseInput (input, normaliseContent) {
     // (Async)Iterable<String>
     // (Async)Iterable<{ path, content }>
     if (isFileObject(value) || isBlob(value) || typeof value === 'string' || value instanceof String) {
-      yield * map(peekable, (value) => toFileObject(value, normaliseContent))
+      yield * map(peekable, (/** @type {ImportCandidate} */ value) => toFileObject(value, normaliseContent))
       return
     }
 
@@ -18697,7 +16907,7 @@ module.exports = async function * normaliseInput (input, normaliseContent) {
     // ReadableStream<(Async)Iterable<?>>
     // ReadableStream<ReadableStream<?>>
     if (value[Symbol.iterator] || value[Symbol.asyncIterator] || isReadableStream(value)) {
-      yield * map(peekable, (value) => toFileObject(value, normaliseContent))
+      yield * map(peekable, (/** @type {ImportCandidate} */ value) => toFileObject(value, normaliseContent))
       return
     }
   }
@@ -18714,16 +16924,19 @@ module.exports = async function * normaliseInput (input, normaliseContent) {
 }
 
 /**
- * @template {Blob|AsyncIterable<Uint8Array>} Content
- * @param {import('ipfs-core-types/src/files').ToEntry} input
- * @param {(content:ToContent) => Content|Promise<Content>} normaliseContent
- * @returns {Promise<import('ipfs-core-types/src/files').Entry<Content>>}
+ * @param {ImportCandidate} input
+ * @param {(content:ToContent) => AsyncIterable<Uint8Array>} normaliseContent
  */
 async function toFileObject (input, normaliseContent) {
   // @ts-ignore - Those properties don't exist on most input types
   const { path, mode, mtime, content } = input
 
-  const file = { path: path || '', mode: modeToNumber(mode), mtime: mtimeToObject(mtime) }
+  /** @type {ImporterImportCandidate} */
+  const file = {
+    path: path || '',
+    mode: parseMode(mode),
+    mtime: parseMtime(mtime)
+  }
 
   if (content) {
     file.content = await normaliseContent(content)
@@ -18766,7 +16979,7 @@ function isBlob (obj) {
  * An object with a path or content property
  *
  * @param {any} obj
- * @returns {obj is import('ipfs-core-types/src/files').ToEntry}
+ * @returns {obj is import('ipfs-core-types/src/utils').ImportCandidate}
  */
 function isFileObject (obj) {
   return typeof obj === 'object' && (obj.path || obj.content)
@@ -18779,96 +16992,11 @@ function isFileObject (obj) {
 const isReadableStream = (value) =>
   value && typeof value.getReader === 'function'
 
-/**
- * @param {any} mtime
- * @returns {{secs:number, nsecs:number}|undefined}
- */
-function mtimeToObject (mtime) {
-  if (mtime == null) {
-    return undefined
-  }
-
-  // Javascript Date
-  if (mtime instanceof Date) {
-    const ms = mtime.getTime()
-    const secs = Math.floor(ms / 1000)
-
-    return {
-      secs: secs,
-      nsecs: (ms - (secs * 1000)) * 1000
-    }
-  }
-
-  // { secs, nsecs }
-  if (Object.prototype.hasOwnProperty.call(mtime, 'secs')) {
-    return {
-      secs: mtime.secs,
-      nsecs: mtime.nsecs
-    }
-  }
-
-  // UnixFS TimeSpec
-  if (Object.prototype.hasOwnProperty.call(mtime, 'Seconds')) {
-    return {
-      secs: mtime.Seconds,
-      nsecs: mtime.FractionalNanoseconds
-    }
-  }
-
-  // process.hrtime()
-  if (Array.isArray(mtime)) {
-    return {
-      secs: mtime[0],
-      nsecs: mtime[1]
-    }
-  }
-  /*
-  TODO: https://github.com/ipfs/aegir/issues/487
-
-  // process.hrtime.bigint()
-  if (typeof mtime === 'bigint') {
-    const secs = mtime / BigInt(1e9)
-    const nsecs = mtime - (secs * BigInt(1e9))
-
-    return {
-      secs: parseInt(secs),
-      nsecs: parseInt(nsecs)
-    }
-  }
-  */
-}
-
-/**
- * @param {any} mode
- * @returns {number|undefined}
- */
-function modeToNumber (mode) {
-  if (mode == null) {
-    return undefined
-  }
-
-  if (typeof mode === 'number') {
-    return mode
-  }
-
-  mode = mode.toString()
-
-  if (mode.substring(0, 1) === '0') {
-    // octal string
-    return parseInt(mode, 8)
-  }
-
-  // decimal string
-  return parseInt(mode, 10)
-}
-
 module.exports = {
   isBytes,
   isBlob,
   isFileObject,
-  isReadableStream,
-  mtimeToObject,
-  modeToNumber
+  isReadableStream
 }
 
 
@@ -18882,6 +17010,22 @@ module.exports = {
 
 const errCode = __nccwpck_require__(2997)
 const CID = __nccwpck_require__(9016)
+
+/**
+ * @typedef {Object} Pinnable
+ * @property {string | InstanceType<typeof window.String> | CID} [path]
+ * @property {CID} [cid]
+ * @property {boolean} [recursive]
+ * @property {any} [metadata]
+ *
+ * @typedef {CID|string|InstanceType<typeof window.String>|Pinnable} ToPin
+ * @typedef {ToPin|Iterable<ToPin>|AsyncIterable<ToPin>} Source
+ *
+ * @typedef {Object} Pin
+ * @property {string|CID} path
+ * @property {boolean} recursive
+ * @property {any} [metadata]
+ */
 
 /**
  * Transform one of:
@@ -18935,7 +17079,8 @@ module.exports = async function * normaliseInput (input) {
   }
 
   // Iterable<?>
-  if (input[Symbol.iterator]) {
+  if (Symbol.iterator in input) {
+    // @ts-ignore
     const iterator = input[Symbol.iterator]()
     const first = iterator.next()
     if (first.done) return iterator
@@ -18962,7 +17107,8 @@ module.exports = async function * normaliseInput (input) {
   }
 
   // AsyncIterable<?>
-  if (input[Symbol.asyncIterator]) {
+  if (Symbol.asyncIterator in input) {
+    // @ts-ignore
     const iterator = input[Symbol.asyncIterator]()
     const first = await iterator.next()
     if (first.done) return iterator
@@ -18992,12 +17138,18 @@ module.exports = async function * normaliseInput (input) {
 }
 
 /**
- * @param {ToPinWithPath|ToPinWithCID} input
- * @returns {Pin}
+ * @param {Pinnable} input
  */
 function toPin (input) {
+  const path = input.cid || `${input.path}`
+
+  if (!path) {
+    throw errCode(new Error('Unexpected input: Please path either a CID or an IPFS path'), 'ERR_UNEXPECTED_INPUT')
+  }
+
+  /** @type {Pin} */
   const pin = {
-    path: input.path == null ? input.cid : `${input.path}`,
+    path,
     recursive: input.recursive !== false
   }
 
@@ -19008,28 +17160,6 @@ function toPin (input) {
   return pin
 }
 
-/**
- * @typedef {Object} ToPinWithPath
- * @property {string | InstanceType<typeof window.String> | CID} path
- * @property {undefined} [cid]
- * @property {boolean} [recursive]
- * @property {any} [metadata]
- *
- * @typedef {Object} ToPinWithCID
- * @property {undefined} [path]
- * @property {CID} cid
- * @property {boolean} [recursive]
- * @property {any} [metadata]
- *
- * @typedef {CID|string|InstanceType<typeof window.String>|ToPinWithPath|ToPinWithPath} ToPin
- * @typedef {ToPin|Iterable<ToPin>|AsyncIterable<ToPin>} Source
- *
- * @typedef {Object} Pin
- * @property {string|CID} path
- * @property {boolean} recursive
- * @property {any} [metadata]
- */
-
 
 /***/ }),
 
@@ -19039,7 +17169,8 @@ function toPin (input) {
 "use strict";
 
 
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+// @ts-ignore no types
 const multiAddrToUri = __nccwpck_require__(2849)
 
 /**
@@ -19049,17 +17180,13 @@ const multiAddrToUri = __nccwpck_require__(2849)
 module.exports = (url) => {
   try {
     // @ts-expect-error
-    url = multiAddrToUri(multiaddr(url))
+    url = multiAddrToUri(new Multiaddr(url))
   } catch (err) { }
 
   url = url.toString()
 
   return url
 }
-
-/**
- * @typedef {import('multiaddr')} Multiaddr
- */
 
 
 /***/ }),
@@ -19081,11 +17208,14 @@ const { AbortController } = __nccwpck_require__(2092)
 /**
  * @typedef {import('ipfs-utils/src/types').ProgressFn} IPFSUtilsHttpUploadProgressFn
  * @typedef {import('ipfs-core-types/src/root').AddProgressFn} IPFSCoreAddProgressFn
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ * @typedef {import('ipfs-core-types/src/root').AddResult} AddResult
  */
 
 module.exports = configure((api) => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/add-all/index')>}
+   * @type {RootAPI["addAll"]}
    */
   async function * addAll (source, options = {}) {
     // allow aborting requests on body errors
@@ -19100,6 +17230,7 @@ module.exports = configure((api) => {
     // `{ total, loaded}` passed to `onUploadProgress` and `multipart.total`
     // in which case we disable progress updates to be written out.
     const [progressFn, onUploadProgress] = typeof options.progress === 'function'
+      // @ts-ignore tsc picks up the node codepath
       ? createProgressHandler(total, parts, options.progress)
       : [undefined, undefined]
 
@@ -19174,9 +17305,9 @@ const createOnUploadProgress = (size, parts, progress) => {
 
 /**
  * @param {any} input
- * @returns {import('ipfs-core-types/src/files').UnixFSEntry}
  */
 function toCoreInterface ({ name, hash, size, mode, mtime, mtimeNsecs }) {
+  /** @type {AddResult} */
   const output = {
     path: name,
     cid: new CID(hash),
@@ -19194,7 +17325,6 @@ function toCoreInterface ({ name, hash, size, mode, mtime, mtimeNsecs }) {
     }
   }
 
-  // @ts-ignore
   return output
 }
 
@@ -19212,16 +17342,21 @@ const last = __nccwpck_require__(7123)
 const configure = __nccwpck_require__(8624)
 
 /**
- * @param {import("./lib/core").ClientOptions} options
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
+/**
+ * @param {import('./types').Options} options
  */
 module.exports = (options) => {
   const all = addAll(options)
   return configure(() => {
     /**
-     * @type {import('.').Implements<typeof import('ipfs-core/src/components/add')>}
+     * @type {RootAPI["add"]}
      */
     async function add (input, options = {}) {
-      // @ts-ignore - last may return undefind if source is empty
+      // @ts-ignore - last may return undefined if source is empty
       return await last(all(input, options))
     }
     return add
@@ -19237,6 +17372,9 @@ module.exports = (options) => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   wantlist: __nccwpck_require__(9235)(config),
   wantlistForPeer: __nccwpck_require__(4226)(config),
@@ -19253,14 +17391,18 @@ module.exports = config => ({
 "use strict";
 
 
-const { BigNumber } = __nccwpck_require__(7558)
 const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bitswap').API<HTTPClientExtraOptions>} BitswapAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bitswap/stat')>}
+   * @type {BitswapAPI["stat"]}
    */
   async function stat (options = {}) {
     const res = await api.post('bitswap/stat', {
@@ -19275,17 +17417,20 @@ module.exports = configure(api => {
   return stat
 })
 
+/**
+ * @param {any} res
+ */
 function toCoreInterface (res) {
   return {
     provideBufLen: res.ProvideBufLen,
-    wantlist: (res.Wantlist || []).map(k => new CID(k['/'])),
+    wantlist: (res.Wantlist || []).map((/** @type {{ '/': string }} */ k) => new CID(k['/'])),
     peers: (res.Peers || []),
-    blocksReceived: new BigNumber(res.BlocksReceived),
-    dataReceived: new BigNumber(res.DataReceived),
-    blocksSent: new BigNumber(res.BlocksSent),
-    dataSent: new BigNumber(res.DataSent),
-    dupBlksReceived: new BigNumber(res.DupBlksReceived),
-    dupDataReceived: new BigNumber(res.DupDataReceived)
+    blocksReceived: BigInt(res.BlocksReceived),
+    dataReceived: BigInt(res.DataReceived),
+    blocksSent: BigInt(res.BlocksSent),
+    dataSent: BigInt(res.DataSent),
+    dupBlksReceived: BigInt(res.DupBlksReceived),
+    dupDataReceived: BigInt(res.DupDataReceived)
   }
 }
 
@@ -19302,9 +17447,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bitswap').API<HTTPClientExtraOptions>} BitswapAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bitswap/unwant')>}
+   * @type {BitswapAPI["unwant"]}
    */
   async function unwant (cid, options = {}) {
     const res = await api.post('bitswap/unwant', {
@@ -19336,9 +17486,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bitswap').API<HTTPClientExtraOptions>} BitswapAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bitswap/wantlist-for-peer')>}
+   * @type {BitswapAPI["wantlistForPeer"]}
    */
   async function wantlistForPeer (peerId, options = {}) {
     // @ts-ignore - CID|string seems to confuse typedef
@@ -19354,7 +17509,7 @@ module.exports = configure(api => {
       headers: options.headers
     })).json()
 
-    return (res.Keys || []).map(k => new CID(k['/']))
+    return (res.Keys || []).map((/** @type {{ '/': string }} */ k) => new CID(k['/']))
   }
   return wantlistForPeer
 })
@@ -19372,9 +17527,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bitswap').API<HTTPClientExtraOptions>} BitswapAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bitswap/wantlist')>}
+   * @type {BitswapAPI["wantlist"]}
    */
   async function wantlist (options = {}) {
     const res = await (await api.post('bitswap/wantlist', {
@@ -19384,7 +17544,7 @@ module.exports = configure(api => {
       headers: options.headers
     })).json()
 
-    return (res.Keys || []).map(k => new CID(k['/']))
+    return (res.Keys || []).map((/** @type {{ '/': string }} */ k) => new CID(k['/']))
   }
   return wantlist
 })
@@ -19403,9 +17563,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/block').API<HTTPClientExtraOptions>} BlockAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/block/get')>}
+   * @type {BlockAPI["get"]}
    */
   async function get (cid, options = {}) {
     // @ts-ignore - CID|string seems to confuse typedef
@@ -19435,6 +17600,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   get: __nccwpck_require__(3476)(config),
   stat: __nccwpck_require__(934)(config),
@@ -19460,9 +17628,14 @@ const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/block').API<HTTPClientExtraOptions>} BlockAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/block/put')>}
+   * @type {BlockAPI["put"]}
    */
   async function put (data, options = {}) {
     if (Block.isBlock(data)) {
@@ -19518,7 +17691,7 @@ module.exports = configure(api => {
       throw err
     }
 
-    return new Block(/** @type {Uint8Array} */(data), new CID(res.Key))
+    return new Block((/** @type {Uint8Array} */ data), new CID(res.Key))
   }
 
   return put
@@ -19537,9 +17710,15 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/block').API<HTTPClientExtraOptions>} BlockAPI
+ * @typedef {import('ipfs-core-types/src/block').RmResult} RmResult
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/block/rm')>}
+   * @type {BlockAPI["rm"]}
    */
   async function * rm (cid, options = {}) {
     if (!Array.isArray(cid)) {
@@ -19565,7 +17744,11 @@ module.exports = configure(api => {
   return rm
 })
 
+/**
+ * @param {*} removed
+ */
 function toCoreInterface (removed) {
+  /** @type {RmResult} */
   const out = {
     cid: new CID(removed.Hash)
   }
@@ -19590,9 +17773,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/block').API<HTTPClientExtraOptions>} BlockAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/block/stat')>}
+   * @type {BlockAPI["stat"]}
    */
   async function stat (cid, options = {}) {
     const res = await api.post('block/stat', {
@@ -19623,11 +17811,16 @@ module.exports = configure(api => {
 
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bootstrap').API<HTTPClientExtraOptions>} BootstrapAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bootstrap/add')>}
+   * @type {BootstrapAPI["add"]}
    */
   async function add (addr, options = {}) {
     const res = await api.post('bootstrap/add', {
@@ -19642,7 +17835,7 @@ module.exports = configure(api => {
 
     const { Peers } = await res.json()
 
-    return { Peers: Peers.map(ma => new Multiaddr(ma)) }
+    return { Peers: Peers.map((/** @type {string} */ ma) => new Multiaddr(ma)) }
   }
 
   return add
@@ -19659,11 +17852,16 @@ module.exports = configure(api => {
 
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bootstrap').API<HTTPClientExtraOptions>} BootstrapAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bootstrap/clear')>}
+   * @type {BootstrapAPI["clear"]}
    */
   async function clear (options = {}) {
     const res = await api.post('bootstrap/rm', {
@@ -19678,7 +17876,7 @@ module.exports = configure(api => {
 
     const { Peers } = await res.json()
 
-    return { Peers: Peers.map(ma => new Multiaddr(ma)) }
+    return { Peers: Peers.map((/** @type {string} */ ma) => new Multiaddr(ma)) }
   }
 
   return clear
@@ -19693,6 +17891,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   add: __nccwpck_require__(7676)(config),
   clear: __nccwpck_require__(1598)(config),
@@ -19712,11 +17913,16 @@ module.exports = config => ({
 
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bootstrap').API<HTTPClientExtraOptions>} BootstrapAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bootstrap/list')>}
+   * @type {BootstrapAPI["list"]}
    */
   async function list (options = {}) {
     const res = await api.post('bootstrap/list', {
@@ -19728,7 +17934,7 @@ module.exports = configure(api => {
 
     const { Peers } = await res.json()
 
-    return { Peers: Peers.map(ma => new Multiaddr(ma)) }
+    return { Peers: Peers.map((/** @type {string} */ ma) => new Multiaddr(ma)) }
   }
 
   return list
@@ -19745,11 +17951,16 @@ module.exports = configure(api => {
 
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bootstrap').API<HTTPClientExtraOptions>} BootstrapAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bootstrap/reset')>}
+   * @type {BootstrapAPI["reset"]}
    */
   async function reset (options = {}) {
     const res = await api.post('bootstrap/add', {
@@ -19764,7 +17975,7 @@ module.exports = configure(api => {
 
     const { Peers } = await res.json()
 
-    return { Peers: Peers.map(ma => new Multiaddr(ma)) }
+    return { Peers: Peers.map((/** @type {string} */ ma) => new Multiaddr(ma)) }
   }
 
   return reset
@@ -19781,11 +17992,16 @@ module.exports = configure(api => {
 
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/bootstrap').API<HTTPClientExtraOptions>} BootstrapAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/bootstrap/rm')>}
+   * @type {BootstrapAPI["rm"]}
    */
   async function rm (addr, options = {}) {
     const res = await api.post('bootstrap/rm', {
@@ -19800,7 +18016,7 @@ module.exports = configure(api => {
 
     const { Peers } = await res.json()
 
-    return { Peers: Peers.map(ma => new Multiaddr(ma)) }
+    return { Peers: Peers.map((/** @type {string} */ ma) => new Multiaddr(ma)) }
   }
 
   return rm
@@ -19819,9 +18035,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/cat')>}
+   * @type {RootAPI["cat"]}
    */
   async function * cat (path, options = {}) {
     const res = await api.post('cat', {
@@ -19852,8 +18073,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {RootAPI["commands"]}
+   */
+  const commands = async (options = {}) => {
     const res = await api.post('commands', {
       timeout: options.timeout,
       signal: options.signal,
@@ -19863,6 +18092,7 @@ module.exports = configure(api => {
 
     return res.json()
   }
+  return commands
 })
 
 
@@ -19877,9 +18107,14 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config').API<HTTPClientExtraOptions>} ConfigAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'get', import('ipfs-core/src/components/config')>}
+   * @type {ConfigAPI["get"]}
    */
   const get = async (key, options = {}) => {
     if (!key) {
@@ -19915,9 +18150,14 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config').API<HTTPClientExtraOptions>} ConfigAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'getAll', import('ipfs-core/src/components/config')>}
+   * @type {ConfigAPI["getAll"]}
    */
   const getAll = async (options = {}) => {
     const res = await api.post('config/show', {
@@ -19945,6 +18185,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   getAll: __nccwpck_require__(4249)(config),
   get: __nccwpck_require__(5855)(config),
@@ -19965,7 +18208,15 @@ module.exports = config => ({
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config/profiles').API<HTTPClientExtraOptions>} ConfigProfilesAPI
+ */
+
 module.exports = configure(api => {
+  /**
+   * @type {ConfigProfilesAPI["apply"]}
+   */
   async function apply (profile, options = {}) {
     const res = await api.post('config/profile/apply', {
       timeout: options.timeout,
@@ -19995,6 +18246,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../../types').Options} config
+ */
 module.exports = config => ({
   apply: __nccwpck_require__(1474)(config),
   list: __nccwpck_require__(2238)(config)
@@ -20013,8 +18267,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config/profiles').API<HTTPClientExtraOptions>} ConfigProfilesAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {ConfigProfilesAPI["list"]}
+   */
+  async function list (options = {}) {
     const res = await api.post('config/profile/list', {
       timeout: options.timeout,
       signal: options.signal,
@@ -20024,8 +18286,9 @@ module.exports = configure(api => {
 
     const data = await res.json()
 
-    return data.map(profile => toCamel(profile))
+    return data.map((/** @type {Record<string, any>} */ profile) => toCamel(profile))
   }
+  return list
 })
 
 
@@ -20044,9 +18307,14 @@ const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config').API<HTTPClientExtraOptions>} ConfigAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'replace', import('ipfs-core/src/components/config')>}
+   * @type {ConfigAPI["replace"]}
    */
   const replace = async (config, options = {}) => {
     // allow aborting requests on body errors
@@ -20078,13 +18346,17 @@ module.exports = configure(api => {
 "use strict";
 
 
-const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/config').API<HTTPClientExtraOptions>} ConfigAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'set', import('ipfs-core/src/components/config')>}
+   * @type {ConfigAPI["set"]}
    */
   const set = async (key, value, options = {}) => {
     if (typeof key !== 'string') {
@@ -20103,12 +18375,16 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
-    return toCamel(await res.json())
+    await res.text()
   }
 
   return set
 })
 
+/**
+ * @param {*} key
+ * @param {*} value
+ */
 const encodeParam = (key, value) => {
   switch (typeof value) {
     case 'boolean':
@@ -20133,13 +18409,18 @@ const configure = __nccwpck_require__(8624)
 const multicodec = __nccwpck_require__(7081)
 const loadFormat = __nccwpck_require__(7079)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dag').API<HTTPClientExtraOptions>} DAGAPI
+ */
+
 module.exports = configure((api, opts) => {
   const getBlock = __nccwpck_require__(3476)(opts)
   const dagResolve = __nccwpck_require__(4307)(opts)
   const load = loadFormat(opts.ipld)
 
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/dag/get')>}
+   * @type {DAGAPI["get"]}
    */
   const get = async (cid, options = {}) => {
     const resolved = await dagResolve(cid, options)
@@ -20152,7 +18433,7 @@ module.exports = configure((api, opts) => {
       resolved.remainderPath = '/'
     }
 
-    return format.resolver.resolve(block.data, resolved.remainderPath)
+    return format.resolver.resolve(block.data, resolved.remainderPath || '')
   }
 
   return get
@@ -20167,10 +18448,14 @@ module.exports = configure((api, opts) => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   get: __nccwpck_require__(8677)(config),
   put: __nccwpck_require__(6632)(config),
-  resolve: __nccwpck_require__(4307)(config)
+  resolve: __nccwpck_require__(4307)(config),
+  tree: __nccwpck_require__(2117)(config)
 })
 
 
@@ -20192,11 +18477,16 @@ const { AbortController } = __nccwpck_require__(2092)
 const multicodec = __nccwpck_require__(7081)
 const loadFormat = __nccwpck_require__(7079)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dag').API<HTTPClientExtraOptions>} DAGAPI
+ */
+
 module.exports = configure((api, opts) => {
   const load = loadFormat(opts.ipld)
 
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/dag/put')>}
+   * @type {DAGAPI["put"]}
    */
   const put = async (dagNode, options = {}) => {
     if (options.cid && (options.format || options.hashAlg)) {
@@ -20225,6 +18515,7 @@ module.exports = configure((api, opts) => {
       ...encodingOptions
     }
 
+    // @ts-ignore settings.format might be an invalid CodecName
     const format = await load(settings.format)
     const serialized = format.util.serialize(dagNode)
 
@@ -20262,9 +18553,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dag').API<HTTPClientExtraOptions>} DAGAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/dag/resolve')>}
+   * @type {DAGAPI["resolve"]}
    */
   const resolve = async (ipfsPath, options = {}) => {
     const res = await api.post('dag/resolve', {
@@ -20288,28 +18584,59 @@ module.exports = configure(api => {
 
 /***/ }),
 
+/***/ 2117:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const configure = __nccwpck_require__(8624)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dag').API<HTTPClientExtraOptions>} DAGAPI
+ */
+
+module.exports = configure(api => {
+  /**
+   * @type {DAGAPI["tree"]}
+   */
+  const tree = async (ipfsPath, options = {}) => {
+    throw new Error('Not implemented')
+  }
+
+  return tree
+})
+
+
+/***/ }),
+
 /***/ 1919:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const { FinalPeer } = __nccwpck_require__(5899)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'findPeer', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["findPeer"]}
    */
   async function findPeer (peerId, options = {}) {
     const res = await api.post('dht/findpeer', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: `${peerId instanceof Uint8Array ? new CID(peerId) : peerId}`,
+        arg: peerId,
         ...options
       }),
       headers: options.headers
@@ -20320,7 +18647,7 @@ module.exports = configure(api => {
         const { ID, Addrs } = data.Responses[0]
         return {
           id: ID,
-          addrs: (Addrs || []).map(a => multiaddr(a))
+          addrs: (Addrs || []).map((/** @type {string} **/ a) => new Multiaddr(a))
         }
       }
     }
@@ -20341,14 +18668,19 @@ module.exports = configure(api => {
 
 
 const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const { Provider } = __nccwpck_require__(5899)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'findProvs', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["findProvs"]}
    */
   async function * findProvs (cid, options = {}) {
     const res = await api.post('dht/findprovs', {
@@ -20366,7 +18698,7 @@ module.exports = configure(api => {
         for (const { ID, Addrs } of message.Responses) {
           yield {
             id: ID,
-            addrs: (Addrs || []).map(a => multiaddr(a))
+            addrs: (Addrs || []).map((/** @type {string} **/ a) => new Multiaddr(a))
           }
         }
       }
@@ -20391,9 +18723,14 @@ const { Value } = __nccwpck_require__(5899)
 const uint8ArrayToString = __nccwpck_require__(757)
 const uint8ArrayFromString = __nccwpck_require__(828)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'get', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["get"]}
    */
   async function get (key, options = {}) {
     const res = await api.post('dht/get', {
@@ -20427,6 +18764,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   get: __nccwpck_require__(1827)(config),
   put: __nccwpck_require__(7003)(config),
@@ -20447,16 +18787,21 @@ module.exports = config => ({
 
 
 const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'provide', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["provide"]}
    */
-  async function * provide (cids, options = {}) {
+  async function * provide (cids, options = { recursive: false }) {
     cids = Array.isArray(cids) ? cids : [cids]
 
     const res = await api.post('dht/provide', {
@@ -20473,9 +18818,9 @@ module.exports = configure(api => {
       message = toCamel(message)
       message.id = new CID(message.id)
       if (message.responses) {
-        message.responses = message.responses.map(({ ID, Addrs }) => ({
+        message.responses = message.responses.map((/** @type {{ ID: string, Addrs: string[] }} */ { ID, Addrs }) => ({
           id: ID,
-          addrs: (Addrs || []).map(a => multiaddr(a))
+          addrs: (Addrs || []).map((/** @type {string} **/ a) => new Multiaddr(a))
         }))
       } else {
         message.responses = []
@@ -20497,16 +18842,22 @@ module.exports = configure(api => {
 
 
 const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const multipartRequest = __nccwpck_require__(694)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'put', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["put"]}
    */
   async function * put (key, value, options = {}) {
     // allow aborting requests on body errors
@@ -20530,9 +18881,9 @@ module.exports = configure(api => {
       message = toCamel(message)
       message.id = new CID(message.id)
       if (message.responses) {
-        message.responses = message.responses.map(({ ID, Addrs }) => ({
+        message.responses = message.responses.map((/** @type {{ ID: string, Addrs: string[] }} */ { ID, Addrs }) => ({
           id: ID,
-          addrs: (Addrs || []).map(a => multiaddr(a))
+          addrs: (Addrs || []).map(a => new Multiaddr(a))
         }))
       }
       yield message
@@ -20552,14 +18903,19 @@ module.exports = configure(api => {
 
 
 const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/dht').API<HTTPClientExtraOptions>} DHTAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').ImplementsMethod<'query', import('ipfs-core/src/components/dht')>}
+   * @type {DHTAPI["query"]}
    */
   async function * query (peerId, options = {}) {
     const res = await api.post('dht/query', {
@@ -20575,9 +18931,9 @@ module.exports = configure(api => {
     for await (let message of res.ndjson()) {
       message = toCamel(message)
       message.id = new CID(message.id)
-      message.responses = (message.responses || []).map(({ ID, Addrs }) => ({
+      message.responses = (message.responses || []).map((/** @type {{ ID: string, Addrs: string[] }} */ { ID, Addrs }) => ({
         id: ID,
-        addrs: (Addrs || []).map(a => multiaddr(a))
+        addrs: (Addrs || []).map((/** @type {string} **/ a) => new Multiaddr(a))
       }))
       yield message
     }
@@ -20620,8 +18976,16 @@ module.exports = {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/diag').API<HTTPClientExtraOptions>} DiagAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {DiagAPI["cmds"]}
+   */
+  async function cmds (options = {}) {
     const res = await api.post('diag/cmds', {
       timeout: options.timeout,
       signal: options.signal,
@@ -20631,6 +18995,7 @@ module.exports = configure(api => {
 
     return res.json()
   }
+  return cmds
 })
 
 
@@ -20642,6 +19007,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   net: __nccwpck_require__(3209)(config),
   sys: __nccwpck_require__(5952)(config),
@@ -20660,8 +19028,16 @@ module.exports = config => ({
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/diag').API<HTTPClientExtraOptions>} DiagAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {DiagAPI["net"]}
+   */
+  async function net (options = {}) {
     const res = await api.post('diag/net', {
       timeout: options.timeout,
       signal: options.signal,
@@ -20670,6 +19046,7 @@ module.exports = configure(api => {
     })
     return res.json()
   }
+  return net
 })
 
 
@@ -20684,8 +19061,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/diag').API<HTTPClientExtraOptions>} DiagAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {DiagAPI["sys"]}
+   */
+  async function sys (options = {}) {
     const res = await api.post('diag/sys', {
       timeout: options.timeout,
       signal: options.signal,
@@ -20695,6 +19080,7 @@ module.exports = configure(api => {
 
     return res.json()
   }
+  return sys
 })
 
 
@@ -20709,9 +19095,14 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/dns')>}
+   * @type {RootAPI["dns"]}
    */
   const dns = async (domain, options = {}) => {
     const res = await api.post('dns', {
@@ -20743,9 +19134,14 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/chmod')>}
+   * @type {FilesAPI["chmod"]}
    */
   async function chmod (path, mode, options = {}) {
     const res = await api.post('files/chmod', {
@@ -20761,7 +19157,6 @@ module.exports = configure(api => {
 
     await res.text()
   }
-
   return chmod
 })
 
@@ -20775,22 +19170,28 @@ module.exports = configure(api => {
 
 
 const CID = __nccwpck_require__(9016)
-const { findSources } = __nccwpck_require__(6188)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/cp')>}
+   * @type {FilesAPI["cp"]}
    */
-  async function cp (...args) {
-    const { sources, options } = findSources(args)
+  async function cp (sources, destination, options = {}) {
+    if (!Array.isArray(sources)) {
+      sources = [sources]
+    }
 
     const res = await api.post('files/cp', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: sources.map(src => CID.isCID(src) ? `/ipfs/${src}` : src),
+        arg: sources.concat(destination).map(src => CID.isCID(src) ? `/ipfs/${src}` : src),
         ...options
       }),
       headers: options.headers
@@ -20798,7 +19199,6 @@ module.exports = configure(api => {
 
     await res.text()
   }
-
   return cp
 })
 
@@ -20815,9 +19215,14 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/flush')>}
+   * @type {FilesAPI["flush"]}
    */
   async function flush (path, options = {}) {
     if (!path || typeof path !== 'string') {
@@ -20837,7 +19242,6 @@ module.exports = configure(api => {
 
     return new CID(data.Cid)
   }
-
   return flush
 })
 
@@ -20850,6 +19254,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   chmod: __nccwpck_require__(1837)(config),
   cp: __nccwpck_require__(323)(config),
@@ -20878,9 +19285,13 @@ const toCamelWithMetadata = __nccwpck_require__(3280)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/ls')>}
+   * @type {FilesAPI["ls"]}
    */
   async function * ls (path, options = {}) {
     if (!path || typeof path !== 'string') {
@@ -20911,10 +19322,12 @@ module.exports = configure(api => {
       }
     }
   }
-
   return ls
 })
 
+/**
+ * @param {*} entry
+ */
 function toCoreInterface (entry) {
   if (entry.hash) {
     entry.cid = new CID(entry.hash)
@@ -20939,9 +19352,14 @@ function toCoreInterface (entry) {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/mkdir')>}
+   * @type {FilesAPI["mkdir"]}
    */
   async function mkdir (path, options = {}) {
     const res = await api.post('files/mkdir', {
@@ -20956,7 +19374,6 @@ module.exports = configure(api => {
 
     await res.text()
   }
-
   return mkdir
 })
 
@@ -20970,27 +19387,32 @@ module.exports = configure(api => {
 
 
 const CID = __nccwpck_require__(9016)
-const { findSources } = __nccwpck_require__(6188)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/mv')>}
+   * @type {FilesAPI["mv"]}
    */
-  async function mv (...args) {
-    const { sources, options } = findSources(args)
+  async function mv (sources, destination, options = {}) {
+    if (!Array.isArray(sources)) {
+      sources = [sources]
+    }
 
     const res = await api.post('files/mv', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: sources.map(src => CID.isCID(src) ? `/ipfs/${src}` : src),
+        arg: sources.concat(destination).map(src => CID.isCID(src) ? `/ipfs/${src}` : src),
         ...options
       }),
       headers: options.headers
     })
-
     await res.text()
   }
 
@@ -21006,13 +19428,19 @@ module.exports = configure(api => {
 "use strict";
 
 
+// @ts-ignore no types
 const toIterable = __nccwpck_require__(6758)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/read')>}
+   * @type {FilesAPI["read"]}
    */
   async function * read (path, options = {}) {
     const res = await api.post('files/read', {
@@ -21028,7 +19456,6 @@ module.exports = configure(api => {
 
     yield * toIterable(res.body)
   }
-
   return read
 })
 
@@ -21042,21 +19469,23 @@ module.exports = configure(api => {
 
 
 const configure = __nccwpck_require__(8624)
-const { findSources } = __nccwpck_require__(6188)
 const toUrlSearchParams = __nccwpck_require__(2326)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
 
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/rm')>}
+   * @type {FilesAPI["rm"]}
    */
-  async function rm (...args) {
-    const { sources, options } = findSources(args)
-
+  async function rm (path, options = {}) {
     const res = await api.post('files/rm', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: sources,
+        arg: path,
         ...options
       }),
       headers: options.headers
@@ -21064,7 +19493,6 @@ module.exports = configure(api => {
 
     await res.text()
   }
-
   return rm
 })
 
@@ -21082,12 +19510,17 @@ const toCamelWithMetadata = __nccwpck_require__(3280)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/stat')>}
+   * @type {FilesAPI["stat"]}
    */
   async function stat (path, options = {}) {
-    if (typeof path !== 'string') {
+    if (path && !CID.isCID(path) && typeof path !== 'string') {
       options = path || {}
       path = '/'
     }
@@ -21106,10 +19539,12 @@ module.exports = configure(api => {
     data.WithLocality = data.WithLocality || false
     return toCoreInterface(toCamelWithMetadata(data))
   }
-
   return stat
 })
 
+/**
+ * @param {*} entry
+ */
 function toCoreInterface (entry) {
   entry.cid = new CID(entry.hash)
   delete entry.hash
@@ -21128,9 +19563,14 @@ function toCoreInterface (entry) {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/touch')>}
+   * @type {FilesAPI["touch"]}
    */
   async function touch (path, options = {}) {
     const res = await api.post('files/touch', {
@@ -21145,41 +19585,8 @@ module.exports = configure(api => {
 
     await res.text()
   }
-
   return touch
 })
-
-
-/***/ }),
-
-/***/ 6188:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-
-exports.findSources = (args) => {
-  /** @type {Record<any, any>} */
-  let options = {}
-  let sources = []
-
-  if (!Array.isArray(args[args.length - 1]) && typeof args[args.length - 1] === 'object') {
-    options = args.pop()
-  }
-
-  if (args.length === 1 && Array.isArray(args[0])) {
-    // support ipfs.files.cp([src, dest], opts)
-    sources = args[0]
-  } else {
-    // support ipfs.files.cp(src, dest, opts) and ipfs.files.cp(src1, src2, dest, opts)
-    sources = args
-  }
-
-  return {
-    sources,
-    options
-  }
-}
 
 
 /***/ }),
@@ -21191,16 +19598,21 @@ exports.findSources = (args) => {
 
 
 const modeToString = __nccwpck_require__(3179)
-const { mtimeToObject } = __nccwpck_require__(5130)
+const { parseMtime } = __nccwpck_require__(9811)
 const configure = __nccwpck_require__(8624)
 const multipartRequest = __nccwpck_require__(694)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/files').API<HTTPClientExtraOptions>} FilesAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('..').Implements<typeof import('ipfs-core/src/components/files/write')>}
+   * @type {FilesAPI["write"]}
    */
   async function write (path, input, options = {}) {
     // allow aborting requests on body errors
@@ -21222,14 +19634,13 @@ module.exports = configure(api => {
           content: input,
           path: 'arg',
           mode: modeToString(options.mode),
-          mtime: mtimeToObject(options.mtime)
+          mtime: parseMtime(options.mtime)
         }, controller, options.headers)
       )
     })
 
     await res.text()
   }
-
   return write
 })
 
@@ -21266,15 +19677,21 @@ module.exports = configure(api => {
 "use strict";
 
 
+// @ts-ignore no types
 const Tar = __nccwpck_require__(3555)
 const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const map = __nccwpck_require__(8753)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/get')>}
+   * @type {RootAPI["get"]}
    */
   async function * get (path, options = {}) {
     const res = await api.post('get', {
@@ -21322,29 +19739,40 @@ module.exports = configure(api => {
 
 
 const toCamel = __nccwpck_require__(123)
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/id')>}
+   * @type {RootAPI["id"]}
    */
   async function id (options = {}) {
     const res = await api.post('id', {
       timeout: options.timeout,
       signal: options.signal,
-      searchParams: toUrlSearchParams(options),
+      searchParams: toUrlSearchParams({
+        arg: options.peerId ? options.peerId.toString() : undefined,
+        ...options
+      }),
       headers: options.headers
     })
     const data = await res.json()
 
-    const output = toCamel(data)
-
-    if (output.addresses) {
-      output.addresses = output.addresses.map(ma => multiaddr(ma))
+    const output = {
+      ...toCamel(data)
     }
 
+    if (output.addresses) {
+      output.addresses = output.addresses.map((/** @type {string} */ ma) => new Multiaddr(ma))
+    }
+
+    // @ts-ignore server output is not typed
     return output
   }
   return id
@@ -21361,7 +19789,7 @@ module.exports = configure(api => {
 /* eslint-env browser */
 
 const CID = __nccwpck_require__(9016)
-const multiaddr = __nccwpck_require__(5858)
+const { multiaddr } = __nccwpck_require__(5858)
 const multibase = __nccwpck_require__(8959)
 const multicodec = __nccwpck_require__(7081)
 const multihash = __nccwpck_require__(450)
@@ -21369,10 +19797,16 @@ const globSource = __nccwpck_require__(2524)
 const urlSource = __nccwpck_require__(996)
 
 /**
- * @param {import("./lib/core").ClientOptions} options
+ * @typedef {import('./types').EndpointConfig} EndpointConfig
+ * @typedef {import('./types').Options} Options
  */
-function ipfsClient (options = {}) {
-  return {
+
+/**
+ * @param {Options} options
+ */
+function create (options = {}) {
+  /** @type {import('ipfs-core-types').IPFS & { getEndpointConfig: () => EndpointConfig }} */
+  const client = {
     add: __nccwpck_require__(4810)(options),
     addAll: __nccwpck_require__(9980)(options),
     bitswap: __nccwpck_require__(6549)(options),
@@ -21389,6 +19823,7 @@ function ipfsClient (options = {}) {
     get: __nccwpck_require__(9063)(options),
     getEndpointConfig: __nccwpck_require__(225)(options),
     id: __nccwpck_require__(8869)(options),
+    isOnline: __nccwpck_require__(6107)(options),
     key: __nccwpck_require__(3383)(options),
     log: __nccwpck_require__(4717)(options),
     ls: __nccwpck_require__(7735)(options),
@@ -21401,54 +19836,86 @@ function ipfsClient (options = {}) {
     refs: __nccwpck_require__(6414)(options),
     repo: __nccwpck_require__(9502)(options),
     resolve: __nccwpck_require__(726)(options),
+    start: __nccwpck_require__(1674)(options),
     stats: __nccwpck_require__(1887)(options),
     stop: __nccwpck_require__(8730)(options),
-    shutdown: __nccwpck_require__(8730)(options),
     swarm: __nccwpck_require__(4915)(options),
     version: __nccwpck_require__(403)(options)
   }
+
+  return client
 }
 
-Object.assign(ipfsClient, { CID, multiaddr, multibase, multicodec, multihash, globSource, urlSource })
+module.exports = {
+  create,
+  CID,
+  multiaddr,
+  multibase,
+  multicodec,
+  multihash,
+  globSource,
+  urlSource
+}
 
-module.exports = ipfsClient
+
+/***/ }),
+
+/***/ 6107:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const callId = __nccwpck_require__(8869)
 
 /**
- * @typedef {Object} HttpOptions
- * @property {Headers | Record<string, string>} [headers] - An object or [Headers](https://developer.mozilla.org/en-US/docs/Web/API/Headers) instance that can be used to set custom HTTP headers. Note that this option can also be [configured globally](#custom-headers) via the constructor options.
- * @property {URLSearchParams | Record<string, string>} [searchParams] - An object or [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams) instance that can be used to add additional query parameters to the query string sent with each request.
- *
- * @typedef {import('ipfs-core/src/utils').AbortOptions} AbortOptions}
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
  */
 
 /**
- * This is an utility type that can be used to derive type of the HTTP Client
- * API from the Core API. It takes type of the API factory (from ipfs-core),
- * derives API from it's return type and extends it last `options` parameter
- * with `HttpOptions`.
- *
- * This can be used to avoid (re)typing API interface when implementing it in
- * http client e.g you can annotate `ipfs.addAll` implementation with
- *
- * `@type {Implements<typeof import('ipfs-core/src/components/add-all')>}`
- *
- * **Caution**: This supports APIs with up to four parameters and last optional
- * `options` parameter, anything else will result to `never` type.
- *
- * @template {(config:any) => any} APIFactory
- * @typedef {APIWithExtraOptions<ReturnType<APIFactory>, HttpOptions>} Implements
+ * @param {import('./types').Options} options
  */
+module.exports = options => {
+  const id = callId(options)
+
+  /**
+   * @type {RootAPI["isOnline"]}
+   */
+  async function isOnline (options = {}) {
+    const res = await id(options)
+
+    return Boolean(res && res.addresses && res.addresses.length)
+  }
+  return isOnline
+}
+
+
+/***/ }),
+
+/***/ 315:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const configure = __nccwpck_require__(8624)
 
 /**
- * @template Key
- * @template {(config:any) => any} APIFactory
- * @typedef {import('./interface').APIMethodWithExtraOptions<ReturnType<APIFactory>, Key, HttpOptions>} ImplementsMethod
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
  */
 
-/**
- * @template API, Extra
- * @typedef {import('./interface').APIWithExtraOptions<API, Extra>} APIWithExtraOptions
- */
+module.exports = configure(api => {
+  /**
+   * @type {KeyAPI["export"]}
+   */
+  const exportKey = async (name, password, options = {}) => {
+    throw new Error('Not implemented')
+  }
+
+  return exportKey
+})
 
 
 /***/ }),
@@ -21463,8 +19930,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
+
 module.exports = configure(api => {
-  return async (name, options = {}) => {
+  /**
+   * @type {KeyAPI["gen"]}
+   */
+  async function gen (name, options = { type: 'rsa', size: 2048 }) {
     const res = await api.post('key/gen', {
       timeout: options.timeout,
       signal: options.signal,
@@ -21476,8 +19951,10 @@ module.exports = configure(api => {
     })
     const data = await res.json()
 
+    // @ts-ignore server output is not typed
     return toCamel(data)
   }
+  return gen
 })
 
 
@@ -21493,13 +19970,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure(api => {
-  return async (name, pem, password, options = {}) => {
-    if (typeof password !== 'string') {
-      options = password || {}
-      password = null
-    }
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
 
+module.exports = configure(api => {
+  /**
+   * @type {KeyAPI["import"]}
+   */
+  async function importKey (name, pem, password, options = {}) {
     const res = await api.post('key/import', {
       timeout: options.timeout,
       signal: options.signal,
@@ -21513,8 +19993,10 @@ module.exports = configure(api => {
     })
     const data = await res.json()
 
+    // @ts-ignore server output is not typed
     return toCamel(data)
   }
+  return importKey
 })
 
 
@@ -21526,12 +20008,44 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   gen: __nccwpck_require__(1573)(config),
   list: __nccwpck_require__(5728)(config),
   rename: __nccwpck_require__(5558)(config),
   rm: __nccwpck_require__(3162)(config),
-  import: __nccwpck_require__(5145)(config)
+  import: __nccwpck_require__(5145)(config),
+  export: __nccwpck_require__(315)(config),
+  info: __nccwpck_require__(7538)(config)
+})
+
+
+/***/ }),
+
+/***/ 7538:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const configure = __nccwpck_require__(8624)
+
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
+
+module.exports = configure(api => {
+  /**
+   * @type {KeyAPI["info"]}
+   */
+  const info = async (name, options = {}) => {
+    throw new Error('Not implemented')
+  }
+
+  return info
 })
 
 
@@ -21547,8 +20061,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {KeyAPI["list"]}
+   */
+  async function list (options = {}) {
     const res = await api.post('key/list', {
       timeout: options.timeout,
       signal: options.signal,
@@ -21557,8 +20079,10 @@ module.exports = configure(api => {
     })
     const data = await res.json()
 
-    return (data.Keys || []).map(k => toCamel(k))
+    // @ts-ignore server output is not typed
+    return (data.Keys || []).map((/** @type {any} **/ k) => toCamel(k))
   }
+  return list
 })
 
 
@@ -21574,8 +20098,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
+
 module.exports = configure(api => {
-  return async (oldName, newName, options = {}) => {
+  /**
+   * @type {KeyAPI["rename"]}
+   */
+  async function rename (oldName, newName, options = {}) {
     const res = await api.post('key/rename', {
       timeout: options.timeout,
       signal: options.signal,
@@ -21589,8 +20121,10 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
+    // @ts-ignore server output is not typed
     return toCamel(await res.json())
   }
+  return rename
 })
 
 
@@ -21606,8 +20140,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/key').API<HTTPClientExtraOptions>} KeyAPI
+ */
+
 module.exports = configure(api => {
-  return async (name, options = {}) => {
+  /**
+   * @type {KeyAPI["rm"]}
+   */
+  async function rm (name, options = {}) {
     const res = await api.post('key/rm', {
       timeout: options.timeout,
       signal: options.signal,
@@ -21619,8 +20161,10 @@ module.exports = configure(api => {
     })
     const data = await res.json()
 
+    // @ts-ignore server output is not typed
     return toCamel(data.Keys[0])
   }
+  return rm
 })
 
 
@@ -21635,13 +20179,10 @@ module.exports = configure(api => {
 const { anySignal } = __nccwpck_require__(9428)
 
 /**
- * @typedef {AbortSignal | undefined} MaybeSignal
- *
- * @param  {MaybeSignal[]} signals
+ * @param {any[]} signals
  * @returns {AbortSignal[]}
  */
 function filter (signals) {
-  // @ts-ignore
   return signals.filter(Boolean)
 }
 
@@ -21666,17 +20207,17 @@ const Client = __nccwpck_require__(2741)
 
 // Set default configuration and call create function with them
 /**
- * @typedef { import("./core").ClientOptions } ClientOptions
+ * @typedef { import("../types").Options } Options
  */
 
 /**
  * @template T
- * @typedef {(client: Client, clientOptions: ClientOptions) => T} Fn
+ * @typedef {(client: Client, clientOptions: Options) => T} Fn
  */
 
 /**
  * @template T
- * @typedef {(clientOptions: ClientOptions) => T} Factory
+ * @typedef {(clientOptions: Options) => T} Factory
  */
 
 /**
@@ -21700,14 +20241,14 @@ module.exports = configure
 "use strict";
 
 /* eslint-env browser */
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const { isBrowser, isWebWorker, isNode } = __nccwpck_require__(8804)
 const { default: parseDuration } = __nccwpck_require__(3805)
 const log = __nccwpck_require__(8237)('ipfs-http-client:lib:error-handler')
 const HTTP = __nccwpck_require__(5529)
 const merge = __nccwpck_require__(2555)
 const toUrlString = __nccwpck_require__(5815)
-const http = __nccwpck_require__(5876)
+const http = __nccwpck_require__(8605)
 const https = __nccwpck_require__(7211)
 
 const DEFAULT_PROTOCOL = isBrowser || isWebWorker ? location.protocol : 'http'
@@ -21715,11 +20256,17 @@ const DEFAULT_HOST = isBrowser || isWebWorker ? location.hostname : 'localhost'
 const DEFAULT_PORT = isBrowser || isWebWorker ? location.port : '5001'
 
 /**
- * @param {ClientOptions|URL|Multiaddr|string} [options]
- * @returns {ClientOptions}
+ * @typedef {import('ipfs-utils/src/types').HTTPOptions} HTTPOptions
+ * @typedef {import('../types').Options} Options
+ */
+
+/**
+ * @param {Options|URL|Multiaddr|string} [options]
+ * @returns {Options}
  */
 const normalizeOptions = (options = {}) => {
   let url
+  /** @type {Options} */
   let opts = {}
   let agent
 
@@ -21770,6 +20317,9 @@ const normalizeOptions = (options = {}) => {
   }
 }
 
+/**
+ * @param {Response} response
+ */
 const errorHandler = async (response) => {
   let msg
 
@@ -21792,12 +20342,12 @@ const errorHandler = async (response) => {
 
   // This is what go-ipfs returns where there's a timeout
   if (msg && msg.includes('context deadline exceeded')) {
-    error = new HTTP.TimeoutError(response)
+    error = new HTTP.TimeoutError('Request timed out')
   }
 
   // This also gets returned
   if (msg && msg.includes('request timed out')) {
-    error = new HTTP.TimeoutError(response)
+    error = new HTTP.TimeoutError('Request timed out')
   }
 
   // If we managed to extract a message from the response, use it
@@ -21809,42 +20359,32 @@ const errorHandler = async (response) => {
 }
 
 const KEBAB_REGEX = /[A-Z\u00C0-\u00D6\u00D8-\u00DE]/g
+
+/**
+ * @param {string} str
+ */
 const kebabCase = (str) => {
   return str.replace(KEBAB_REGEX, function (match) {
     return '-' + match.toLowerCase()
   })
 }
 
+/**
+ * @param {string | number} value
+ */
 const parseTimeout = (value) => {
   return typeof value === 'string' ? parseDuration(value) : value
 }
 
-/**
- * @typedef {import('http').Agent} HttpAgent
- * @typedef {import('https').Agent} HttpsAgent
- *
- * @typedef {Object} ClientOptions
- * @property {string} [host]
- * @property {number} [port]
- * @property {string} [protocol]
- * @property {Headers|Record<string, string>} [headers] - Request headers.
- * @property {number|string} [timeout] - Amount of time until request should timeout in ms or humand readable. https://www.npmjs.com/package/parse-duration for valid string values.
- * @property {string} [apiPath] - Path to the API.
- * @property {URL|string|Multiaddr} [url] - Full API URL.
- * @property {object} [ipld]
- * @property {any[]} [ipld.formats] - An array of additional [IPLD formats](https://github.com/ipld/interface-ipld-format) to support
- * @property {(format: string) => Promise<any>} [ipld.loadFormat] - an async function that takes the name of an [IPLD format](https://github.com/ipld/interface-ipld-format) as a string and should return the implementation of that codec
- * @property {HttpAgent|HttpsAgent} [agent] - A [http.Agent](https://nodejs.org/api/http.html#http_class_http_agent) used to control connection persistence and reuse for HTTP clients (only supported in node.js)
- */
 class Client extends HTTP {
   /**
-   * @param {ClientOptions|URL|Multiaddr|string} [options]
+   * @param {Options|URL|Multiaddr|string} [options]
    */
   constructor (options = {}) {
     const opts = normalizeOptions(options)
 
     super({
-      timeout: parseTimeout(opts.timeout) || 60000 * 20,
+      timeout: parseTimeout(opts.timeout || 0) || 60000 * 20,
       headers: opts.headers,
       base: `${opts.url}`,
       handleError: errorHandler,
@@ -21873,17 +20413,21 @@ class Client extends HTTP {
       agent: opts.agent
     })
 
-    // @ts-ignore
+    // @ts-ignore - cannot delete no-optional fields
     delete this.get
-    // @ts-ignore
+    // @ts-ignore - cannot delete no-optional fields
     delete this.put
-    // @ts-ignore
+    // @ts-ignore - cannot delete no-optional fields
     delete this.delete
-    // @ts-ignore
+    // @ts-ignore - cannot delete no-optional fields
     delete this.options
 
     const fetch = this.fetch
 
+    /**
+     * @param {string | Request} resource
+     * @param {HTTPOptions} options
+     */
     this.fetch = (resource, options = {}) => {
       if (typeof resource === 'string' && !resource.startsWith('/')) {
         resource = `${opts.url}/${resource}`
@@ -21914,19 +20458,26 @@ const dagCBOR = __nccwpck_require__(4448)
 const raw = __nccwpck_require__(6551)
 const multicodec = __nccwpck_require__(7081)
 
-const noop = () => {}
-
 /**
  * @typedef {import('cids')} CID
+ * @typedef {import('interface-ipld-format').Format<any>} IPLDFormat
+ * @typedef {import('multicodec').CodecName} CodecName
+ * @typedef {import('../types').LoadFormatFn} LoadFormatFn
  */
+
+/**
+ * @type {LoadFormatFn}
+ */
+const noop = (codec) => {
+  return Promise.reject(new Error(`Missing IPLD format "${codec}"`))
+}
 
 /**
  * Return an object containing supported IPLD Formats
  *
  * @param {object} [options] - IPLD options passed to the http client constructor
- * @param {Array} [options.formats] - A list of IPLD Formats to use
- * @param {Function} [options.loadFormat] - An async function that can load a format when passed a codec number
- * @returns {Function}
+ * @param {IPLDFormat[]} [options.formats] - A list of IPLD Formats to use
+ * @param {LoadFormatFn} [options.loadFormat] - An async function that can load a format when passed a codec name
  */
 module.exports = ({ formats = [], loadFormat = noop } = {}) => {
   formats = formats || []
@@ -21945,12 +20496,10 @@ module.exports = ({ formats = [], loadFormat = noop } = {}) => {
   /**
    * Attempts to load an IPLD format for the passed CID
    *
-   * @param {import('multicodec').CodecName} codec - The code to load the format for
-   * @returns {Promise<object>} - An IPLD format
+   * @param {CodecName} codec - The code to load the format for
    */
   const loadResolver = async (codec) => {
-    // @ts-ignore - codec is a string and not a CodecName
-    const number = multicodec.getNumber(codec)
+    const number = multicodec.getCodeFromName(codec)
     const format = configuredFormats[number] || await loadFormat(codec)
 
     if (!format) {
@@ -21975,12 +20524,15 @@ module.exports = ({ formats = [], loadFormat = noop } = {}) => {
 "use strict";
 
 
+/**
+ * @param {number | string | undefined} mode
+ */
 module.exports = (mode) => {
-  if (mode === undefined || mode === null) {
+  if (mode == null) {
     return undefined
   }
 
-  if (typeof mode === 'string' || mode instanceof String) {
+  if (typeof mode === 'string') {
     return mode
   }
 
@@ -22001,12 +20553,23 @@ module.exports = (mode) => {
 const normaliseInput = __nccwpck_require__(3570)
 const modeToString = __nccwpck_require__(3179)
 
-async function multipartRequest (source = '', abortController, headers = {}) {
+/**
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidateStream} ImportCandidateStream
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidate} ImportCandidate
+ */
+
+/**
+ * @param {ImportCandidateStream|ImportCandidate} source
+ * @param {AbortController} abortController
+ * @param {Headers|Record<string, string>} [headers]
+ */
+async function multipartRequest (source, abortController, headers = {}) {
   const parts = []
   const formData = new FormData()
   let index = 0
   let total = 0
 
+  // @ts-ignore wrong input type for normaliseInput
   for await (const { content, path, mode, mtime } of normaliseInput(source)) {
     let fileSuffix = ''
     const type = content ? 'file' : 'dir'
@@ -22037,12 +20600,14 @@ async function multipartRequest (source = '', abortController, headers = {}) {
     }
 
     if (content) {
-      formData.set(fieldName, content, encodeURIComponent(path))
+      formData.set(fieldName, content, path != null ? encodeURIComponent(path) : undefined)
       const end = total + content.size
       parts.push({ name: path, start: total, end })
       total = end
-    } else {
+    } else if (path != null) {
       formData.set(fieldName, new File([''], encodeURIComponent(path), { type: 'application/x-directory' }))
+    } else {
+      throw new Error('path or content or both must be set')
     }
 
     index++
@@ -22089,20 +20654,29 @@ const normaliseInput = __nccwpck_require__(4369)
 const { nanoid } = __nccwpck_require__(9140)
 const modeToString = __nccwpck_require__(3179)
 const merge = __nccwpck_require__(2555).bind({ ignoreUndefined: true })
+// @ts-ignore no types
 const toStream = __nccwpck_require__(3259)
 
 /**
- *
- * @param {Object} source
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidateStream} ImportCandidateStream
+ * @typedef {import('ipfs-core-types/src/utils').ImportCandidate} ImportCandidate
+ */
+
+/**
+ * @param {ImportCandidateStream|ImportCandidate} source
  * @param {AbortController} abortController
  * @param {Headers|Record<string, string>} [headers]
  * @param {string} [boundary]
  */
-async function multipartRequest (source = '', abortController, headers = {}, boundary = `-----------------------------${nanoid()}`) {
+async function multipartRequest (source, abortController, headers = {}, boundary = `-----------------------------${nanoid()}`) {
+  /**
+   * @param {ImportCandidateStream|ImportCandidate} source
+   */
   async function * streamFiles (source) {
     try {
       let index = 0
 
+      // @ts-ignore wrong input type for normaliseInput
       for await (const { content, path, mode, mtime } of normaliseInput(source)) {
         let fileSuffix = ''
         const type = content ? 'file' : 'dir'
@@ -22135,7 +20709,7 @@ async function multipartRequest (source = '', abortController, headers = {}, bou
         }
 
         yield `--${boundary}\r\n`
-        yield `Content-Disposition: form-data; name="${fieldName}"; filename="${encodeURIComponent(path)}"\r\n`
+        yield `Content-Disposition: form-data; name="${fieldName}"; filename="${encodeURIComponent(path || '')}"\r\n`
         yield `Content-Type: ${content ? 'application/octet-stream' : 'application/x-directory'}\r\n`
         yield '\r\n'
 
@@ -22145,10 +20719,9 @@ async function multipartRequest (source = '', abortController, headers = {}, bou
 
         index++
       }
-    } catch (err) {
+    } catch {
       // workaround for https://github.com/node-fetch/node-fetch/issues/753
-      // @ts-ignore - abort does not expect an arguments
-      abortController.abort(err)
+      abortController.abort()
     } finally {
       yield `\r\n--${boundary}--\r\n`
     }
@@ -22177,6 +20750,9 @@ module.exports = multipartRequest
 
 const toCamel = __nccwpck_require__(123)
 
+/**
+ * @param {Record<string, any>} entry
+ */
 function toCamelWithMetadata (entry) {
   const file = toCamel(entry)
 
@@ -22207,14 +20783,25 @@ module.exports = toCamelWithMetadata
 "use strict";
 
 
-// Convert object properties to camel case.
-// NOT recursive!
-// e.g.
-// AgentVersion => agentVersion
-// ID => id
+/**
+ * Convert object properties to camel case.
+ * NOT recursive!
+ * e.g.
+ * AgentVersion => agentVersion
+ * ID => id
+ *
+ * @param {Record<string, any>} obj
+ */
 module.exports = obj => {
-  if (obj == null) return obj
+  if (obj == null) {
+    return obj
+  }
+
   const caps = /^[A-Z]+$/
+
+  /** @type {Record<string, any>} */
+  const output = {}
+
   return Object.keys(obj).reduce((camelObj, k) => {
     if (caps.test(k)) { // all caps
       camelObj[k.toLowerCase()] = obj[k]
@@ -22224,7 +20811,7 @@ module.exports = obj => {
       camelObj[k] = obj[k]
     }
     return camelObj
-  }, {})
+  }, output)
 }
 
 
@@ -22237,7 +20824,7 @@ module.exports = obj => {
 
 
 const modeToString = __nccwpck_require__(3179)
-const { mtimeToObject } = __nccwpck_require__(5130)
+const { parseMtime } = __nccwpck_require__(9811)
 
 /**
  * @param {*} params
@@ -22256,7 +20843,7 @@ module.exports = ({ arg, searchParams, hashAlg, mtime, mode, ...options } = {}) 
   }
 
   if (mtime != null) {
-    mtime = mtimeToObject(mtime)
+    mtime = parseMtime(mtime)
 
     options.mtime = mtime.secs
     options.mtimeNsecs = mtime.nsecs
@@ -22279,7 +20866,7 @@ module.exports = ({ arg, searchParams, hashAlg, mtime, mode, ...options } = {}) 
 
   const urlSearchParams = new URLSearchParams(options)
 
-  arg.forEach(arg => urlSearchParams.append('arg', arg))
+  arg.forEach((/** @type {any} */ arg) => urlSearchParams.append('arg', arg))
 
   return urlSearchParams
 }
@@ -22293,6 +20880,9 @@ module.exports = ({ arg, searchParams, hashAlg, mtime, mode, ...options } = {}) 
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   tail: __nccwpck_require__(6995)(config),
   ls: __nccwpck_require__(330)(config),
@@ -22312,8 +20902,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/log').API<HTTPClientExtraOptions>} LogAPI
+ */
+
 module.exports = configure(api => {
-  return async (subsystem, level, options = {}) => {
+  /**
+   * @type {LogAPI["level"]}
+   */
+  async function level (subsystem, level, options = {}) {
     const res = await api.post('log/level', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22329,6 +20927,7 @@ module.exports = configure(api => {
 
     return toCamel(await res.json())
   }
+  return level
 })
 
 
@@ -22343,8 +20942,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/log').API<HTTPClientExtraOptions>} LogAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {LogAPI["ls"]}
+   */
+  async function ls (options = {}) {
     const res = await api.post('log/ls', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22355,6 +20962,7 @@ module.exports = configure(api => {
     const data = await res.json()
     return data.Strings
   }
+  return ls
 })
 
 
@@ -22369,8 +20977,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/log').API<HTTPClientExtraOptions>} LogAPI
+ */
+
 module.exports = configure(api => {
-  return async function * tail (options = {}) {
+  /**
+   * @type {LogAPI["tail"]}
+   */
+  async function * tail (options = {}) {
     const res = await api.post('log/tail', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22380,6 +20996,7 @@ module.exports = configure(api => {
 
     yield * res.ndjson()
   }
+  return tail
 })
 
 
@@ -22396,10 +21013,21 @@ const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const stat = __nccwpck_require__(3233)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure((api, opts) => {
-  return async function * ls (path, options = {}) {
+  /**
+   * @type {RootAPI["ls"]}
+   */
+  async function * ls (path, options = {}) {
     const pathStr = `${path instanceof Uint8Array ? new CID(path) : path}`
 
+    /**
+     * @param {*} link
+     */
     async function mapLink (link) {
       let hash = link.Hash
 
@@ -22411,6 +21039,7 @@ module.exports = configure((api, opts) => {
         hash = stats.cid
       }
 
+      /** @type {import('ipfs-core-types/src/root').IPFSEntry} */
       const entry = {
         name: link.Name,
         path: pathStr + (link.Name ? `/${link.Name}` : ''),
@@ -22474,8 +21103,12 @@ module.exports = configure((api, opts) => {
       yield * links.map(mapLink)
     }
   }
+  return ls
 })
 
+/**
+ * @param {any} link
+ */
 function typeOf (link) {
   switch (link.Type) {
     case 1:
@@ -22484,7 +21117,7 @@ function typeOf (link) {
     case 2:
       return 'file'
     default:
-      return 'unknown'
+      return 'file'
   }
 }
 
@@ -22501,8 +21134,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {RootAPI["mount"]}
+   */
+  async function mount (options = {}) {
     const res = await api.post('dns', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22512,6 +21153,7 @@ module.exports = configure(api => {
 
     return toCamel(await res.json())
   }
+  return mount
 })
 
 
@@ -22523,6 +21165,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   publish: __nccwpck_require__(7325)(config),
   resolve: __nccwpck_require__(2980)(config),
@@ -22542,8 +21187,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/name').API<HTTPClientExtraOptions>} NameAPI
+ */
+
 module.exports = configure(api => {
-  return async (path, options = {}) => {
+  /**
+   * @type {NameAPI["publish"]}
+   */
+  async function publish (path, options = {}) {
     const res = await api.post('name/publish', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22554,8 +21207,10 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
+    // @ts-ignore server output is not typed
     return toCamel(await res.json())
   }
+  return publish
 })
 
 
@@ -22571,8 +21226,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/name/pubsub').API<HTTPClientExtraOptions>} NamePubsubAPI
+ */
+
 module.exports = configure(api => {
-  return async (name, options = {}) => {
+  /**
+   * @type {NamePubsubAPI["cancel"]}
+   */
+  async function cancel (name, options = {}) {
     const res = await api.post('name/pubsub/cancel', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22583,8 +21246,10 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
+    // @ts-ignore server output is not typed
     return toCamel(await res.json())
   }
+  return cancel
 })
 
 
@@ -22596,6 +21261,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../../types').Options} config
+ */
 module.exports = config => ({
   cancel: __nccwpck_require__(2652)(config),
   state: __nccwpck_require__(7000)(config),
@@ -22615,8 +21283,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/name/pubsub').API<HTTPClientExtraOptions>} NamePubsubAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {NamePubsubAPI["state"]}
+   */
+  async function state (options = {}) {
     const res = await api.post('name/pubsub/state', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22624,8 +21300,10 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
+    // @ts-ignore server output is not typed
     return toCamel(await res.json())
   }
+  return state
 })
 
 
@@ -22640,8 +21318,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/name/pubsub').API<HTTPClientExtraOptions>} NamePubsubAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {NamePubsubAPI["subs"]}
+   */
+  async function subs (options = {}) {
     const res = await api.post('name/pubsub/subs', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22652,6 +21338,7 @@ module.exports = configure(api => {
 
     return data.Strings || []
   }
+  return subs
 })
 
 
@@ -22666,8 +21353,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/name').API<HTTPClientExtraOptions>} NameAPI
+ */
+
 module.exports = configure(api => {
-  return async function * (path, options = {}) {
+  /**
+   * @type {NameAPI["resolve"]}
+   */
+  async function * resolve (path, options = {}) {
     const res = await api.post('name/resolve', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22683,6 +21378,7 @@ module.exports = configure(api => {
       yield result.Path
     }
   }
+  return resolve
 })
 
 
@@ -22698,8 +21394,16 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async function data (cid, options = {}) {
+  /**
+   * @type {ObjectAPI["data"]}
+   */
+  async function data (cid, options = {}) {
     const res = await api.post('object/data', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22713,6 +21417,7 @@ module.exports = configure(api => {
 
     return new Uint8Array(data, 0, data.byteLength)
   }
+  return data
 })
 
 
@@ -22730,8 +21435,16 @@ const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const uint8ArrayFromString = __nccwpck_require__(828)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, options = {}) => {
+  /**
+   * @type {ObjectAPI["get"]}
+   */
+  async function get (cid, options = {}) {
     const res = await api.post('object/get', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22746,9 +21459,10 @@ module.exports = configure(api => {
 
     return new DAGNode(
       uint8ArrayFromString(data.Data, 'base64pad'),
-      (data.Links || []).map(l => new DAGLink(l.Name, l.Size, l.Hash))
+      (data.Links || []).map((/** @type {any} */ l) => new DAGLink(l.Name, l.Size, l.Hash))
     )
   }
+  return get
 })
 
 
@@ -22760,6 +21474,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   data: __nccwpck_require__(8856)(config),
   get: __nccwpck_require__(3043)(config),
@@ -22784,8 +21501,16 @@ const { DAGLink } = __nccwpck_require__(4184)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, options = {}) => {
+  /**
+   * @type {ObjectAPI["links"]}
+   */
+  async function links (cid, options = {}) {
     const res = await api.post('object/links', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22797,8 +21522,9 @@ module.exports = configure(api => {
     })
     const data = await res.json()
 
-    return (data.Links || []).map(l => new DAGLink(l.Name, l.Size, l.Hash))
+    return (data.Links || []).map((/** @type {any} */ l) => new DAGLink(l.Name, l.Size, l.Hash))
   }
+  return links
 })
 
 
@@ -22814,8 +21540,16 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {ObjectAPI["new"]}
+   */
+  async function newObject (options = {}) {
     const res = await api.post('object/new', {
       timeout: options.timeout,
       signal: options.signal,
@@ -22830,6 +21564,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return newObject
 })
 
 
@@ -22845,15 +21580,25 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object/patch').API<HTTPClientExtraOptions>} ObjectPatchAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, dLink, options = {}) => {
+  /**
+   * @type {ObjectPatchAPI["addLink"]}
+   */
+  async function addLink (cid, dLink, options = {}) {
     const res = await api.post('object/patch/add-link', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
         arg: [
           `${cid instanceof Uint8Array ? new CID(cid) : cid}`,
+          // @ts-ignore loose types
           dLink.Name || dLink.name || '',
+          // @ts-ignore loose types
           (dLink.Hash || dLink.cid || '').toString() || null
         ],
         ...options
@@ -22865,6 +21610,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return addLink
 })
 
 
@@ -22883,8 +21629,16 @@ const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object/patch').API<HTTPClientExtraOptions>} ObjectPatchAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, data, options = {}) => {
+  /**
+   * @type {ObjectPatchAPI["appendData"]}
+   */
+  async function appendData (cid, data, options = {}) {
     // allow aborting requests on body errors
     const controller = new AbortController()
     const signal = abortSignal(controller.signal, options.signal)
@@ -22906,6 +21660,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return appendData
 })
 
 
@@ -22917,6 +21672,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../../types').Options} config
+ */
 module.exports = config => ({
   addLink: __nccwpck_require__(5348)(config),
   appendData: __nccwpck_require__(3690)(config),
@@ -22937,14 +21695,23 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object/patch').API<HTTPClientExtraOptions>} ObjectPatchAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, dLink, options = {}) => {
+  /**
+   * @type {ObjectPatchAPI["rmLink"]}
+   */
+  async function rmLink (cid, dLink, options = {}) {
     const res = await api.post('object/patch/rm-link', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
         arg: [
           `${cid instanceof Uint8Array ? new CID(cid) : cid}`,
+          // @ts-ignore loose types
           dLink.Name || dLink.name || null
         ],
         ...options
@@ -22956,6 +21723,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return rmLink
 })
 
 
@@ -22974,8 +21742,16 @@ const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object/patch').API<HTTPClientExtraOptions>} ObjectPatchAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, data, options = {}) => {
+  /**
+   * @type {ObjectPatchAPI["setData"]}
+   */
+  async function setData (cid, data, options = {}) {
     // allow aborting requests on body errors
     const controller = new AbortController()
     const signal = abortSignal(controller.signal, options.signal)
@@ -22997,6 +21773,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return setData
 })
 
 
@@ -23015,25 +21792,38 @@ const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
-const unit8ArrayToString = __nccwpck_require__(757)
+const uint8ArrayToString = __nccwpck_require__(757)
 const uint8ArrayFromString = __nccwpck_require__(828)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async (obj, options = {}) => {
+  /**
+   * @type {ObjectAPI["put"]}
+   */
+  async function put (obj, options = {}) {
     let tmpObj = {
+      /** @type {string | undefined} */
+      Data: undefined,
+      /** @type {{ Name: string, Hash: string, Size: number }[]} */
       Links: []
     }
 
     if (obj instanceof Uint8Array) {
       if (!options.enc) {
         tmpObj = {
-          Data: unit8ArrayToString(obj),
+          // FIXME: this will corrupt data for byte values over 127
+          Data: uint8ArrayToString(obj),
           Links: []
         }
       }
-    } else if (DAGNode.isDAGNode(obj)) {
+    } else if (obj instanceof DAGNode) {
       tmpObj = {
-        Data: unit8ArrayToString(obj.Data),
+        // FIXME: this will corrupt data for byte values over 127
+        Data: uint8ArrayToString(obj.Data),
         Links: obj.Links.map(l => ({
           Name: l.Name,
           Hash: l.Hash.toString(),
@@ -23041,8 +21831,15 @@ module.exports = configure(api => {
         }))
       }
     } else if (typeof obj === 'object') {
-      tmpObj.Data = unit8ArrayToString(obj.Data)
-      tmpObj.Links = obj.Links
+      // FIXME: this will corrupt data for for byte values over 127
+      if (obj.Data) {
+        tmpObj.Data = uint8ArrayToString(obj.Data)
+      }
+
+      if (obj.Links) {
+        // @ts-ignore Size is Tsize
+        tmpObj.Links = obj.Links
+      }
     } else {
       throw new Error('obj not recognized')
     }
@@ -23073,6 +21870,7 @@ module.exports = configure(api => {
 
     return new CID(Hash)
   }
+  return put
 })
 
 
@@ -23088,8 +21886,16 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/object').API<HTTPClientExtraOptions>} ObjectAPI
+ */
+
 module.exports = configure(api => {
-  return async (cid, options = {}) => {
+  /**
+   * @type {ObjectAPI["stat"]}
+   */
+  async function stat (cid, options = {}) {
     const res = await api.post('object/stat', {
       timeout: options.timeout,
       signal: options.signal,
@@ -23102,6 +21908,7 @@ module.exports = configure(api => {
 
     return res.json()
   }
+  return stat
 })
 
 
@@ -23118,8 +21925,16 @@ const configure = __nccwpck_require__(8624)
 const normaliseInput = __nccwpck_require__(51)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin').API<HTTPClientExtraOptions>} PinAPI
+ */
+
 module.exports = configure(api => {
-  return async function * addAll (source, options = {}) {
+  /**
+   * @type {PinAPI["addAll"]}
+   */
+  async function * addAll (source, options = {}) {
     for await (const { path, recursive, metadata } of normaliseInput(source)) {
       const res = await api.post('pin/add', {
         timeout: options.timeout,
@@ -23146,6 +21961,7 @@ module.exports = configure(api => {
       }
     }
   }
+  return addAll
 })
 
 
@@ -23161,17 +21977,30 @@ const addAll = __nccwpck_require__(4162)
 const last = __nccwpck_require__(7123)
 const configure = __nccwpck_require__(8624)
 
-module.exports = (options) => {
-  const all = addAll(options)
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin').API<HTTPClientExtraOptions>} PinAPI
+ */
+
+/**
+ * @param {import('../types').Options} config
+ */
+module.exports = (config) => {
+  const all = addAll(config)
 
   return configure(() => {
-    return async function add (path, options = {}) { // eslint-disable-line require-await
-      return last(all({
+    /**
+     * @type {PinAPI["add"]}
+     */
+    async function add (path, options = {}) {
+      // @ts-ignore last can return undefined
+      return last(all([{
         path,
         ...options
-      }, options))
+      }], options))
     }
-  })(options)
+    return add
+  })(config)
 }
 
 
@@ -23185,6 +22014,9 @@ module.exports = (options) => {
 
 const Remote = __nccwpck_require__(8177)
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   add: __nccwpck_require__(9635)(config),
   addAll: __nccwpck_require__(4162)(config),
@@ -23207,7 +22039,18 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin').API<HTTPClientExtraOptions>} PinAPI
+ */
+
+/**
+ * @param {string} type
+ * @param {string} cid
+ * @param {Record<string, string>} metadata
+ */
 function toPin (type, cid, metadata) {
+  /** @type {import('ipfs-core-types/src/pin').LsResult} */
   const pin = {
     type,
     cid: new CID(cid)
@@ -23221,9 +22064,15 @@ function toPin (type, cid, metadata) {
 }
 
 module.exports = configure(api => {
-  return async function * ls (options = {}) {
+  /**
+   * @type {PinAPI["ls"]}
+   */
+  async function * ls (options = {}) {
+    /** @type {any[]} */
+    let paths = []
+
     if (options.paths) {
-      options.paths = Array.isArray(options.paths) ? options.paths : [options.paths]
+      paths = Array.isArray(options.paths) ? options.paths : [options.paths]
     }
 
     const res = await api.post('pin/ls', {
@@ -23231,7 +22080,7 @@ module.exports = configure(api => {
       signal: options.signal,
       searchParams: toUrlSearchParams({
         ...options,
-        arg: (options.paths || []).map(path => `${path}`),
+        arg: paths.map(path => `${path}`),
         stream: true
       }),
       headers: options.headers
@@ -23248,6 +22097,7 @@ module.exports = configure(api => {
       yield toPin(pin.Type, pin.Cid, pin.Metadata)
     }
   }
+  return ls
 })
 
 
@@ -23261,135 +22111,103 @@ module.exports = configure(api => {
 
 const CID = __nccwpck_require__(9016)
 const Client = __nccwpck_require__(2741)
-const Service = __nccwpck_require__(1241)
+const Service = __nccwpck_require__(7503)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
 /**
- * @typedef {import('../..').HttpOptions} HttpOptions
- * @typedef {import('../../lib/core').ClientOptions} ClientOptions
- * @typedef {import('ipfs-core-types/src/basic').AbortOptions} AbortOptions
- * @typedef {import('ipfs-core-types/src/pin/remote').API} API
+ * @typedef {import('../../types').Options} Options
+ * @typedef {import('ipfs-core-types/src/utils').AbortOptions} AbortOptions
  * @typedef {import('ipfs-core-types/src/pin/remote').Pin} Pin
  * @typedef {import('ipfs-core-types/src/pin/remote').AddOptions} AddOptions
  * @typedef {import('ipfs-core-types/src/pin/remote').Query} Query
  * @typedef {import('ipfs-core-types/src/pin/remote').Status} Status
- *
- * @implements {API}
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin/remote').API<HTTPClientExtraOptions>} RemotePiningAPI
  */
+
 class Remote {
   /**
-   * @param {ClientOptions} options
+   * @param {Options} options
    */
   constructor (options) {
-    /** @private */
     this.client = new Client(options)
     /** @readonly */
     this.service = new Service(options)
   }
+}
 
-  /**
-   * Stores an IPFS object(s) from a given path to a remote pinning service.
-   *
-   * @param {CID} cid
-   * @param {AddOptions & AbortOptions & HttpOptions} options
-   * @returns {Promise<Pin>}
-   */
-  add (cid, options) {
-    return Remote.add(this.client, cid, options)
+/**
+ * @type {RemotePiningAPI["add"]}
+ */
+Remote.prototype.add = async function add (cid, { timeout, signal, headers, ...query }) {
+  const response = await this.client.post('pin/remote/add', {
+    timeout,
+    signal,
+    headers,
+    searchParams: encodeAddParams({ cid, ...query })
+  })
+
+  return decodePin(await response.json())
+}
+
+/**
+ * @type {RemotePiningAPI["ls"]}
+ */
+Remote.prototype.ls = async function * ls ({ timeout, signal, headers, ...query }) {
+  const response = await this.client.post('pin/remote/ls', {
+    timeout,
+    signal,
+    headers,
+    searchParams: encodeQuery(query)
+  })
+
+  for await (const pin of response.ndjson()) {
+    yield decodePin(pin)
   }
+}
 
-  /**
-   * @param {Client} client
-   * @param {CID} cid
-   * @param {AddOptions & AbortOptions & HttpOptions} options
-   */
-  static async add (client, cid, { timeout, signal, headers, ...options }) {
-    const response = await client.post('pin/remote/add', {
-      timeout,
-      signal,
-      headers,
-      searchParams: encodeAddParams({ cid, ...options })
+/**
+ * @type {RemotePiningAPI["rm"]}
+ */
+Remote.prototype.rm = async function rm ({ timeout, signal, headers, ...query }) {
+  await this.client.post('pin/remote/rm', {
+    timeout,
+    signal,
+    headers,
+    searchParams: encodeQuery({
+      ...query,
+      all: false
     })
+  })
+}
 
-    return Remote.decodePin(await response.json())
-  }
-
-  /**
-   * @param {Object} json
-   * @param {string} json.Name
-   * @param {string} json.Cid
-   * @param {Status} json.Status
-   * @returns {Pin}
-   */
-  static decodePin ({ Name: name, Status: status, Cid: cid }) {
-    return {
-      cid: new CID(cid),
-      name,
-      status
-    }
-  }
-
-  /**
-   * Returns a list of matching pins on the remote pinning service.
-   *
-   * @param {Query & AbortOptions & HttpOptions} query
-   */
-  ls (query) {
-    return Remote.ls(this.client, query)
-  }
-
-  /**
-   *
-   * @param {Client} client
-   * @param {Query & AbortOptions & HttpOptions} options
-   * @returns {AsyncIterable<Pin>}
-   */
-  static async * ls (client, { timeout, signal, headers, ...query }) {
-    const response = await client.post('pin/remote/ls', {
-      signal,
-      timeout,
-      headers,
-      searchParams: encodeQuery(query)
+/**
+ * @type {RemotePiningAPI["rmAll"]}
+ */
+Remote.prototype.rmAll = async function ({ timeout, signal, headers, ...query }) {
+  await this.client.post('pin/remote/rm', {
+    timeout,
+    signal,
+    headers,
+    searchParams: encodeQuery({
+      ...query,
+      all: true
     })
+  })
+}
 
-    for await (const pin of response.ndjson()) {
-      yield Remote.decodePin(pin)
-    }
-  }
-
-  /**
-   * Removes a single pin object matching query allowing it to be garbage
-   * collected (if needed). Will error if multiple pins mtach provided
-   * query. To remove all matches use `rmAll` instead.
-   *
-   * @param {Query & AbortOptions & HttpOptions} query
-   */
-  rm (query) {
-    return Remote.rm(this.client, { ...query, all: false })
-  }
-
-  /**
-   * Removes all pin object that match given query allowing them to be garbage
-   * collected if needed.
-   *
-   * @param {Query & AbortOptions & HttpOptions} query
-   */
-  rmAll (query) {
-    return Remote.rm(this.client, { ...query, all: true })
-  }
-
-  /**
-   *
-   * @param {Client} client
-   * @param {{all: boolean} & Query & AbortOptions & HttpOptions} options
-   */
-  static async rm (client, { timeout, signal, headers, ...query }) {
-    await client.post('pin/remote/rm', {
-      timeout,
-      signal,
-      headers,
-      searchParams: encodeQuery(query)
-    })
+/**
+ * @param {Object} json
+ * @param {string} json.Name
+ * @param {string} json.Cid
+ * @param {Status} json.Status
+ * @returns {Pin}
+ */
+const decodePin = ({ Name: name, Status: status, Cid: cid }) => {
+  return {
+    cid: new CID(cid),
+    name,
+    status
   }
 }
 
@@ -23469,7 +22287,7 @@ module.exports = Remote
 
 /***/ }),
 
-/***/ 1241:
+/***/ 7503:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
@@ -23479,39 +22297,20 @@ const Client = __nccwpck_require__(2741)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
 /**
- * @typedef {import('../../lib/core').ClientOptions} ClientOptions
- * @typedef {import('../..').HttpOptions} HttpOptions
- * @typedef {import('ipfs-core-types/src/basic').AbortOptions} AbortOptions
- * @typedef {import('ipfs-core-types/src/pin/remote/service').API} API
+ * @typedef {import('../../types').Options} Options
+ * @typedef {import('ipfs-core-types/src/utils').AbortOptions} AbortOptions
  * @typedef {import('ipfs-core-types/src/pin/remote/service').Credentials} Credentials
  * @typedef {import('ipfs-core-types/src/pin/remote/service').RemotePinService} RemotePinService
  * @typedef {import('ipfs-core-types/src/pin/remote/service').RemotePinServiceWithStat} RemotePinServiceWithStat
- * @implements {API}
+ * @typedef {import('../../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin/remote/service').API<HTTPClientExtraOptions>} RemotePiningServiceAPI
  */
 class Service {
   /**
-   * @param {ClientOptions} options
+   * @param {Options} options
    */
   constructor (options) {
-    /** @private */
     this.client = new Client(options)
-  }
-
-  /**
-   * @param {Client} client
-   * @param {string} name
-   * @param {Credentials & AbortOptions & HttpOptions} options
-   */
-  static async add (client, name, options) {
-    const { endpoint, key, headers, timeout, signal } = options
-    await client.post('pin/remote/service/add', {
-      timeout,
-      signal,
-      searchParams: toUrlSearchParams({
-        arg: [name, Service.encodeEndpoint(endpoint), key]
-      }),
-      headers
-    })
   }
 
   /**
@@ -23528,43 +22327,7 @@ class Service {
   }
 
   /**
-   * @param {Client} client
-   * @param {string} name
-   * @param {AbortOptions & HttpOptions} [options]
-   */
-  static async rm (client, name, { timeout, signal, headers } = {}) {
-    await client.post('pin/remote/service/rm', {
-      timeout,
-      signal,
-      headers,
-      searchParams: toUrlSearchParams({
-        arg: name
-      })
-    })
-  }
-
-  /**
-   * @template {true} Stat
-   * @param {Client} client
-   * @param {{ stat?: Stat } & AbortOptions & HttpOptions} [options]
-   */
-  static async ls (client, { stat, timeout, signal, headers } = {}) {
-    const response = await client.post('pin/remote/service/ls', {
-      searchParams: stat === true ? toUrlSearchParams({ stat }) : undefined,
-      timeout,
-      signal,
-      headers
-    })
-
-    /** @type {{RemoteServices: Object[]}} */
-    const { RemoteServices } = await response.json()
-
-    /** @type {Stat extends true ? RemotePinServiceWithStat[] : RemotePinService []} */
-    return (RemoteServices.map(Service.decodeRemoteService))
-  }
-
-  /**
-   * @param {Object} json
+   * @param {any} json
    * @returns {RemotePinServiceWithStat}
    */
   static decodeRemoteService (json) {
@@ -23576,7 +22339,7 @@ class Service {
   }
 
   /**
-   * @param {Object} json
+   * @param {any} json
    * @returns {import('ipfs-core-types/src/pin/remote/service').Stat}
    */
   static decodeStat (json) {
@@ -23601,37 +22364,57 @@ class Service {
       }
     }
   }
+}
 
-  /**
-   * Registers remote pinning service with a given name. Errors if service
-   * with the given name is already registered.
-   *
-   * @param {string} name
-   * @param {Credentials & AbortOptions & HttpOptions} options
-   */
-  add (name, options) {
-    return Service.add(this.client, name, options)
-  }
+/**
+ * @type {RemotePiningServiceAPI["add"]}
+ */
+Service.prototype.add = async function add (name, options) {
+  const { endpoint, key, headers, timeout, signal } = options
 
-  /**
-   * Unregisteres remote pinning service with a given name. If service with such
-   * name isn't registerede this is a noop.
-   *
-   * @param {string} name
-   * @param {AbortOptions & HttpOptions} [options]
-   */
-  rm (name, options) {
-    return Service.rm(this.client, name, options)
-  }
+  await this.client.post('pin/remote/service/add', {
+    timeout,
+    signal,
+    searchParams: toUrlSearchParams({
+      arg: [name, Service.encodeEndpoint(endpoint), key]
+    }),
+    headers
+  })
+}
 
-  /**
-   * List registered remote pinning services.
-   *
-   * @param {{ stat?: true } & AbortOptions & HttpOptions} [options]
-   */
-  ls (options) {
-    return Service.ls(this.client, options)
-  }
+/**
+ * @type {RemotePiningServiceAPI["rm"]}
+ */
+Service.prototype.rm = async function rm (name, options = {}) {
+  await this.client.post('pin/remote/service/rm', {
+    timeout: options.timeout,
+    signal: options.signal,
+    headers: options.headers,
+    searchParams: toUrlSearchParams({
+      arg: name
+    })
+  })
+}
+
+/**
+ * @type {RemotePiningServiceAPI["ls"]}
+ */
+Service.prototype.ls = async function ls (options = {}) {
+  // @ts-ignore cannot derive option type from typedef
+  const { stat, headers, timeout, signal } = options
+
+  const response = await this.client.post('pin/remote/service/ls', {
+    timeout,
+    signal,
+    headers,
+    searchParams: stat === true ? toUrlSearchParams({ stat }) : undefined
+  })
+
+  /** @type {{RemoteServices: Object[]}} */
+  const { RemoteServices } = await response.json()
+
+  /** @type {Stat extends true ? RemotePinServiceWithStat[] : RemotePinService []} */
+  return (RemoteServices.map(Service.decodeRemoteService))
 }
 
 module.exports = Service
@@ -23650,8 +22433,16 @@ const configure = __nccwpck_require__(8624)
 const normaliseInput = __nccwpck_require__(51)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin').API<HTTPClientExtraOptions>} PinAPI
+ */
+
 module.exports = configure(api => {
-  return async function * rmAll (source, options = {}) {
+  /**
+   * @type {PinAPI["rmAll"]}
+   */
+  async function * rmAll (source, options = {}) {
     for await (const { path, recursive } of normaliseInput(source)) {
       const searchParams = new URLSearchParams(options.searchParams)
       searchParams.append('arg', `${path}`)
@@ -23671,13 +22462,14 @@ module.exports = configure(api => {
 
       for await (const pin of res.ndjson()) {
         if (pin.Pins) { // non-streaming response
-          yield * pin.Pins.map(cid => new CID(cid))
+          yield * pin.Pins.map((/** @type {string} */ cid) => new CID(cid))
           continue
         }
         yield new CID(pin)
       }
     }
   }
+  return rmAll
 })
 
 
@@ -23693,17 +22485,30 @@ const rmAll = __nccwpck_require__(3624)
 const last = __nccwpck_require__(7123)
 const configure = __nccwpck_require__(8624)
 
-module.exports = (options) => {
-  const all = rmAll(options)
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pin').API<HTTPClientExtraOptions>} PinAPI
+ */
+
+/**
+ * @param {import('../types').Options} config
+ */
+module.exports = (config) => {
+  const all = rmAll(config)
 
   return configure(() => {
-    return async function rm (path, options = {}) { // eslint-disable-line require-await
-      return last(all({
+    /**
+     * @type {PinAPI["rm"]}
+     */
+    async function rm (path, options = {}) {
+      // @ts-ignore last can return undefined
+      return last(all([{
         path,
         ...options
-      }, options))
+      }], options))
     }
-  })(options)
+    return rm
+  })(config)
 }
 
 
@@ -23719,8 +22524,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
-  return async function * ping (peerId, options = {}) {
+  /**
+   * @type {RootAPI["ping"]}
+   */
+  async function * ping (peerId, options = {}) {
     const res = await api.post('ping', {
       timeout: options.timeout,
       signal: options.signal,
@@ -23734,6 +22547,7 @@ module.exports = configure(api => {
 
     yield * res.ndjson()
   }
+  return ping
 })
 
 
@@ -23745,13 +22559,22 @@ module.exports = configure(api => {
 "use strict";
 
 
-module.exports = config => ({
-  ls: __nccwpck_require__(4165)(config),
-  peers: __nccwpck_require__(5164)(config),
-  publish: __nccwpck_require__(9150)(config),
-  subscribe: __nccwpck_require__(4958)(config),
-  unsubscribe: __nccwpck_require__(4131)(config)
-})
+const SubscriptionTracker = __nccwpck_require__(3323)
+
+/**
+ * @param {import('../types').Options} config
+ */
+module.exports = config => {
+  const subscriptionTracker = new SubscriptionTracker()
+
+  return {
+    ls: __nccwpck_require__(4165)(config),
+    peers: __nccwpck_require__(5164)(config),
+    publish: __nccwpck_require__(9150)(config),
+    subscribe: __nccwpck_require__(4958)(config, subscriptionTracker),
+    unsubscribe: __nccwpck_require__(4131)(config, subscriptionTracker)
+  }
+}
 
 
 /***/ }),
@@ -23765,8 +22588,16 @@ module.exports = config => ({
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pubsub').API<HTTPClientExtraOptions>} PubsubAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {PubsubAPI["ls"]}
+   */
+  async function ls (options = {}) {
     const { Strings } = await (await api.post('pubsub/ls', {
       timeout: options.timeout,
       signal: options.signal,
@@ -23776,6 +22607,7 @@ module.exports = configure(api => {
 
     return Strings || []
   }
+  return ls
 })
 
 
@@ -23790,13 +22622,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure(api => {
-  return async (topic, options = {}) => {
-    if (!options && typeof topic === 'object') {
-      options = topic || {}
-      topic = null
-    }
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pubsub').API<HTTPClientExtraOptions>} PubsubAPI
+ */
 
+module.exports = configure(api => {
+  /**
+   * @type {PubsubAPI["peers"]}
+   */
+  async function peers (topic, options = {}) {
     const res = await api.post('pubsub/peers', {
       timeout: options.timeout,
       signal: options.signal,
@@ -23811,6 +22646,7 @@ module.exports = configure(api => {
 
     return Strings || []
   }
+  return peers
 })
 
 
@@ -23828,8 +22664,16 @@ const multipartRequest = __nccwpck_require__(694)
 const abortSignal = __nccwpck_require__(1486)
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pubsub').API<HTTPClientExtraOptions>} PubsubAPI
+ */
+
 module.exports = configure(api => {
-  return async (topic, data, options = {}) => {
+  /**
+   * @type {PubsubAPI["publish"]}
+   */
+  async function publish (topic, data, options = {}) {
     const searchParams = toUrlSearchParams({
       arg: topic,
       ...options
@@ -23851,6 +22695,7 @@ module.exports = configure(api => {
 
     await res.text()
   }
+  return publish
 })
 
 
@@ -23865,72 +22710,96 @@ module.exports = configure(api => {
 const uint8ArrayFromString = __nccwpck_require__(828)
 const uint8ArrayToString = __nccwpck_require__(757)
 const log = __nccwpck_require__(8237)('ipfs-http-client:pubsub:subscribe')
-const SubscriptionTracker = __nccwpck_require__(3323)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure((api, options) => {
-  const subsTracker = SubscriptionTracker.singleton()
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pubsub').Message} Message
+ * @typedef {(err: Error, fatal: boolean, msg?: Message) => void} ErrorHandlerFn
+ * @typedef {import('ipfs-core-types/src/pubsub').API<HTTPClientExtraOptions & { onError?: ErrorHandlerFn }>} PubsubAPI
+ * @typedef {import('../types').Options} Options
+ */
 
-  return async (topic, handler, options = {}) => { // eslint-disable-line require-await
-    options.signal = subsTracker.subscribe(topic, handler, options.signal)
+/**
+ * @param {Options} options
+ * @param {import('./subscription-tracker')} subsTracker
+ */
+module.exports = (options, subsTracker) => {
+  return configure((api) => {
+    /**
+     * @type {PubsubAPI["subscribe"]}
+     */
+    async function subscribe (topic, handler, options = {}) { // eslint-disable-line require-await
+      options.signal = subsTracker.subscribe(topic, handler, options.signal)
 
-    let done
-    let fail
+      /** @type {(value?: any) => void} */
+      let done
+      /** @type {(error: Error) => void} */
+      let fail
 
-    const result = new Promise((resolve, reject) => {
-      done = resolve
-      fail = reject
-    })
-
-    // In Firefox, the initial call to fetch does not resolve until some data
-    // is received. If this doesn't happen within 1 second assume success
-    const ffWorkaround = setTimeout(() => done(), 1000)
-
-    // Do this async to not block Firefox
-    setTimeout(() => {
-      api.post('pubsub/sub', {
-        timeout: options.timeout,
-        signal: options.signal,
-        searchParams: toUrlSearchParams({
-          arg: topic,
-          ...options
-        }),
-        headers: options.headers
+      const result = new Promise((resolve, reject) => {
+        done = resolve
+        fail = reject
       })
-        .catch((err) => {
-          // Initial subscribe fail, ensure we clean up
-          subsTracker.unsubscribe(topic, handler)
 
-          fail(err)
+      // In Firefox, the initial call to fetch does not resolve until some data
+      // is received. If this doesn't happen within 1 second assume success
+      const ffWorkaround = setTimeout(() => done(), 1000)
+
+      // Do this async to not block Firefox
+      setTimeout(() => {
+        api.post('pubsub/sub', {
+          timeout: options.timeout,
+          signal: options.signal,
+          searchParams: toUrlSearchParams({
+            arg: topic,
+            ...options
+          }),
+          headers: options.headers
         })
-        .then((response) => {
-          clearTimeout(ffWorkaround)
+          .catch((err) => {
+            // Initial subscribe fail, ensure we clean up
+            subsTracker.unsubscribe(topic, handler)
 
-          if (!response) {
-            // if there was no response, the subscribe failed
-            return
-          }
-
-          readMessages(response.ndjson(), {
-            onMessage: handler,
-            onEnd: () => subsTracker.unsubscribe(topic, handler),
-            onError: options.onError
+            fail(err)
           })
+          .then((response) => {
+            clearTimeout(ffWorkaround)
 
-          done()
-        })
-    }, 0)
+            if (!response) {
+              // if there was no response, the subscribe failed
+              return
+            }
 
-    return result
-  }
-})
+            readMessages(response, {
+              onMessage: handler,
+              onEnd: () => subsTracker.unsubscribe(topic, handler),
+              onError: options.onError
+            })
 
-async function readMessages (msgStream, { onMessage, onEnd, onError }) {
+            done()
+          })
+      }, 0)
+
+      return result
+    }
+    return subscribe
+  })(options)
+}
+
+/**
+ * @param {import('ipfs-utils/src/types').ExtendedResponse} response
+ * @param {object} options
+ * @param {(message: Message) => void} options.onMessage
+ * @param {() => void} options.onEnd
+ * @param {ErrorHandlerFn} [options.onError]
+ */
+async function readMessages (response, { onMessage, onEnd, onError }) {
   onError = onError || log
 
   try {
-    for await (const msg of msgStream) {
+    for await (const msg of response.ndjson()) {
       try {
         if (!msg.from) {
           continue
@@ -23948,13 +22817,29 @@ async function readMessages (msgStream, { onMessage, onEnd, onError }) {
       }
     }
   } catch (err) {
-    // FIXME: In testing with Chrome, err.type is undefined (should not be!)
-    // Temporarily use the name property instead.
-    if (err.type !== 'aborted' && err.name !== 'AbortError') {
+    if (!isAbortError(err)) {
       onError(err, true) // Fatal
     }
   } finally {
     onEnd()
+  }
+}
+
+/**
+ * @param {Error & {type?:string}} error
+ * @returns {boolean}
+ */
+const isAbortError = error => {
+  switch (error.type) {
+    case 'aborted':
+      return true
+    // It is `abort` in Electron instead of `aborted`
+    case 'abort':
+      return true
+    default:
+      // FIXME: In testing with Chrome, err.type is undefined (should not be!)
+      // Temporarily use the name property instead.
+      return error.name === 'AbortError'
   }
 }
 
@@ -23969,17 +22854,25 @@ async function readMessages (msgStream, { onMessage, onEnd, onError }) {
 
 const { AbortController } = __nccwpck_require__(2092)
 
+/**
+ * @typedef {import('ipfs-core-types/src/pubsub').MessageHandlerFn} MessageHandlerFn
+ *
+ * @typedef {Object} Subscription
+ * @property {MessageHandlerFn} handler
+ * @property {AbortController} controller
+ */
+
 class SubscriptionTracker {
   constructor () {
+    /** @type {Map<string, Subscription[]>} */
     this._subs = new Map()
   }
 
-  static singleton () {
-    if (SubscriptionTracker.instance) return SubscriptionTracker.instance
-    SubscriptionTracker.instance = new SubscriptionTracker()
-    return SubscriptionTracker.instance
-  }
-
+  /**
+   * @param {string} topic
+   * @param {MessageHandlerFn} handler
+   * @param {AbortSignal} [signal]
+   */
   subscribe (topic, handler, signal) {
     const topicSubs = this._subs.get(topic) || []
 
@@ -24000,6 +22893,10 @@ class SubscriptionTracker {
     return controller.signal
   }
 
+  /**
+   * @param {string} topic
+   * @param {MessageHandlerFn} [handler]
+   */
   unsubscribe (topic, handler) {
     const subs = this._subs.get(topic) || []
     let unsubs
@@ -24012,11 +22909,13 @@ class SubscriptionTracker {
       unsubs = subs
     }
 
+    if (!(this._subs.get(topic) || []).length) {
+      this._subs.delete(topic)
+    }
+
     unsubs.forEach(s => s.controller.abort())
   }
 }
-
-SubscriptionTracker.instance = null
 
 module.exports = SubscriptionTracker
 
@@ -24024,17 +22923,29 @@ module.exports = SubscriptionTracker
 /***/ }),
 
 /***/ 4131:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ ((module) => {
 
 "use strict";
 
 
-const SubscriptionTracker = __nccwpck_require__(3323)
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/pubsub').API<HTTPClientExtraOptions>} PubsubAPI
+ * @typedef {import('../types').Options} Options
+ */
 
-module.exports = api => {
-  const subsTracker = SubscriptionTracker.singleton()
-  // eslint-disable-next-line require-await
-  return async (topic, handler) => subsTracker.unsubscribe(topic, handler)
+/**
+ * @param {Options} options
+ * @param {import('./subscription-tracker')} subsTracker
+ */
+module.exports = (options, subsTracker) => {
+  /**
+   * @type {PubsubAPI["unsubscribe"]}
+   */
+  async function unsubscribe (topic, handler) {
+    subsTracker.unsubscribe(topic, handler)
+  }
+  return unsubscribe
 }
 
 
@@ -24051,7 +22962,15 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure((api, options) => {
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/refs').API<HTTPClientExtraOptions>} RefsAPI
+ */
+
+module.exports = configure((api, opts) => {
+  /**
+   * @type {RefsAPI["refs"]}
+   */
   const refs = async function * (args, options = {}) {
     if (!Array.isArray(args)) {
       args = [args]
@@ -24070,9 +22989,10 @@ module.exports = configure((api, options) => {
 
     yield * res.ndjson()
   }
-  refs.local = __nccwpck_require__(9848)(options)
 
-  return refs
+  return Object.assign(refs, {
+    local: __nccwpck_require__(9848)(opts)
+  })
 })
 
 
@@ -24088,8 +23008,16 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/refs').API<HTTPClientExtraOptions>} RefsAPI
+ */
+
 module.exports = configure(api => {
-  return async function * refsLocal (options = {}) {
+  /**
+   * @type {RefsAPI["local"]}
+   */
+  async function * refsLocal (options = {}) {
     const res = await api.post('refs/local', {
       timeout: options.timeout,
       signal: options.signal,
@@ -24100,6 +23028,7 @@ module.exports = configure(api => {
 
     yield * res.ndjson()
   }
+  return refsLocal
 })
 
 
@@ -24115,8 +23044,16 @@ const CID = __nccwpck_require__(9016)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/repo').API<HTTPClientExtraOptions>} RepoAPI
+ */
+
 module.exports = configure(api => {
-  return async function * gc (options = {}) {
+  /**
+   * @type {RepoAPI["gc"]}
+   */
+  async function * gc (options = {}) {
     const res = await api.post('repo/gc', {
       timeout: options.timeout,
       signal: options.signal,
@@ -24132,6 +23069,7 @@ module.exports = configure(api => {
 
     yield * res.ndjson()
   }
+  return gc
 })
 
 
@@ -24143,6 +23081,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   gc: __nccwpck_require__(128)(config),
   stat: __nccwpck_require__(7630)(config),
@@ -24158,12 +23099,19 @@ module.exports = config => ({
 "use strict";
 
 
-const { BigNumber } = __nccwpck_require__(7558)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/repo').API<HTTPClientExtraOptions>} RepoAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {RepoAPI["stat"]}
+   */
+  async function stat (options = {}) {
     const res = await api.post('repo/stat', {
       timeout: options.timeout,
       signal: options.signal,
@@ -24173,13 +23121,14 @@ module.exports = configure(api => {
     const data = await res.json()
 
     return {
-      numObjects: new BigNumber(data.NumObjects),
-      repoSize: new BigNumber(data.RepoSize),
+      numObjects: BigInt(data.NumObjects),
+      repoSize: BigInt(data.RepoSize),
       repoPath: data.RepoPath,
       version: data.Version,
-      storageMax: new BigNumber(data.StorageMax)
+      storageMax: BigInt(data.StorageMax)
     }
   }
+  return stat
 })
 
 
@@ -24194,8 +23143,16 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/repo').API<HTTPClientExtraOptions>} RepoAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {RepoAPI["version"]}
+   */
+  async function version (options = {}) {
     const res = await (await api.post('repo/version', {
       timeout: options.timeout,
       signal: options.signal,
@@ -24205,6 +23162,7 @@ module.exports = configure(api => {
 
     return res.Version
   }
+  return version
 })
 
 
@@ -24219,9 +23177,14 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/resolve')>}
+   * @type {RootAPI["resolve"]}
    */
   async function resolve (path, options = {}) {
     const res = await api.post('resolve', {
@@ -24242,33 +23205,68 @@ module.exports = configure(api => {
 
 /***/ }),
 
+/***/ 1674:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const configure = __nccwpck_require__(8624)
+
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
+module.exports = configure(api => {
+  /**
+   * @type {RootAPI["start"]}
+   */
+  const start = async (options = {}) => {
+    throw new Error('Not implemented')
+  }
+
+  return start
+})
+
+
+/***/ }),
+
 /***/ 3309:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-const { BigNumber } = __nccwpck_require__(7558)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/stats').API<HTTPClientExtraOptions>} StatsAPI
+ */
+
 module.exports = configure(api => {
-  return async function * bw (options = {}) {
+  /**
+   * @type {StatsAPI["bw"]}
+   */
+  async function * bw (options = {}) {
     const res = await api.post('stats/bw', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams(options),
       headers: options.headers,
       transform: (stats) => ({
-        totalIn: new BigNumber(stats.TotalIn),
-        totalOut: new BigNumber(stats.TotalOut),
-        rateIn: new BigNumber(stats.RateIn),
-        rateOut: new BigNumber(stats.RateOut)
+        totalIn: BigInt(stats.TotalIn),
+        totalOut: BigInt(stats.TotalOut),
+        rateIn: BigInt(stats.RateIn),
+        rateOut: BigInt(stats.RateOut)
       })
     })
 
     yield * res.ndjson()
   }
+  return bw
 })
 
 
@@ -24280,6 +23278,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   bitswap: __nccwpck_require__(3749)(config),
   bw: __nccwpck_require__(3309)(config),
@@ -24298,8 +23299,16 @@ module.exports = config => ({
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {RootAPI["stop"]}
+   */
+  async function stop (options = {}) {
     const res = await api.post('shutdown', {
       timeout: options.timeout,
       signal: options.signal,
@@ -24309,6 +23318,7 @@ module.exports = configure(api => {
 
     await res.text()
   }
+  return stop
 })
 
 
@@ -24320,25 +23330,36 @@ module.exports = configure(api => {
 "use strict";
 
 
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/swarm').API<HTTPClientExtraOptions>} SwarmAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {SwarmAPI["addrs"]}
+   */
+  async function addrs (options = {}) {
     const res = await api.post('swarm/addrs', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams(options),
       headers: options.headers
     })
+
+    /** @type {{ Addrs: Record<string, string[]> }} */
     const { Addrs } = await res.json()
 
     return Object.keys(Addrs).map(id => ({
       id,
-      addrs: (Addrs[id] || []).map(a => multiaddr(a))
+      addrs: (Addrs[id] || []).map(a => new Multiaddr(a))
     }))
   }
+  return addrs
 })
 
 
@@ -24353,15 +23374,21 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure(api => {
-  return async (addrs, options = {}) => {
-    addrs = Array.isArray(addrs) ? addrs : [addrs]
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/swarm').API<HTTPClientExtraOptions>} SwarmAPI
+ */
 
+module.exports = configure(api => {
+  /**
+   * @type {SwarmAPI["connect"]}
+   */
+  async function connect (addr, options = {}) {
     const res = await api.post('swarm/connect', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: addrs.map(addr => `${addr}`),
+        arg: addr,
         ...options
       }),
       headers: options.headers
@@ -24370,6 +23397,7 @@ module.exports = configure(api => {
 
     return Strings || []
   }
+  return connect
 })
 
 
@@ -24384,15 +23412,21 @@ module.exports = configure(api => {
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
-module.exports = configure(api => {
-  return async (addrs, options = {}) => {
-    addrs = Array.isArray(addrs) ? addrs : [addrs]
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/swarm').API<HTTPClientExtraOptions>} SwarmAPI
+ */
 
+module.exports = configure(api => {
+  /**
+   * @type {SwarmAPI["disconnect"]}
+   */
+  async function disconnect (addr, options = {}) {
     const res = await api.post('swarm/disconnect', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams({
-        arg: addrs.map(addr => `${addr}`),
+        arg: addr,
         ...options
       }),
       headers: options.headers
@@ -24401,6 +23435,7 @@ module.exports = configure(api => {
 
     return Strings || []
   }
+  return disconnect
 })
 
 
@@ -24412,6 +23447,9 @@ module.exports = configure(api => {
 "use strict";
 
 
+/**
+ * @param {import('../types').Options} config
+ */
 module.exports = config => ({
   addrs: __nccwpck_require__(1472)(config),
   connect: __nccwpck_require__(501)(config),
@@ -24429,22 +23467,33 @@ module.exports = config => ({
 "use strict";
 
 
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/swarm').API<HTTPClientExtraOptions>} SwarmAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
+  /**
+   * @type {SwarmAPI["localAddrs"]}
+   */
+  async function localAddrs (options = {}) {
     const res = await api.post('swarm/addrs/local', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams(options),
       headers: options.headers
     })
+
+    /** @type {{ Strings: string[] }} */
     const { Strings } = await res.json()
 
-    return (Strings || []).map(a => multiaddr(a))
+    return (Strings || []).map(a => new Multiaddr(a))
   }
+  return localAddrs
 })
 
 
@@ -24456,43 +23505,42 @@ module.exports = configure(api => {
 "use strict";
 
 
-const multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('../types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/swarm').API<HTTPClientExtraOptions>} SwarmAPI
+ */
+
 module.exports = configure(api => {
-  return async (options = {}) => {
-    const res = await (await api.post('swarm/peers', {
+  /**
+   * @type {SwarmAPI["peers"]}
+   */
+  async function peers (options = {}) {
+    const res = await api.post('swarm/peers', {
       timeout: options.timeout,
       signal: options.signal,
       searchParams: toUrlSearchParams(options),
       headers: options.headers
-    })).json()
+    })
 
-    return (res.Peers || []).map(peer => {
-      const info = {}
-      try {
-        info.addr = multiaddr(peer.Addr)
-        info.peer = peer.Peer
-      } catch (error) {
-        info.error = error
-        info.rawPeerInfo = peer
+    /** @type {{ Peers: { Peer: string, Addr: string, Muxer?: string, Latency?: string, Streams?: string[], Direction?: 0 | 1 }[] }} */
+    const { Peers } = await res.json()
+
+    return (Peers || []).map(peer => {
+      return {
+        addr: new Multiaddr(peer.Addr),
+        peer: peer.Peer,
+        muxer: peer.Muxer,
+        latency: peer.Latency,
+        streams: peer.Streams,
+        direction: peer.Direction == null ? undefined : peer.Direction === 0 ? 'inbound' : 'outbound'
       }
-      if (peer.Muxer) {
-        info.muxer = peer.Muxer
-      }
-      if (peer.Latency) {
-        info.latency = peer.Latency
-      }
-      if (peer.Streams) {
-        info.streams = peer.Streams
-      }
-      if (peer.Direction != null) {
-        info.direction = peer.Direction
-      }
-      return info
     })
   }
+  return peers
 })
 
 
@@ -24508,9 +23556,14 @@ const toCamel = __nccwpck_require__(123)
 const configure = __nccwpck_require__(8624)
 const toUrlSearchParams = __nccwpck_require__(2326)
 
+/**
+ * @typedef {import('./types').HTTPClientExtraOptions} HTTPClientExtraOptions
+ * @typedef {import('ipfs-core-types/src/root').API<HTTPClientExtraOptions>} RootAPI
+ */
+
 module.exports = configure(api => {
   /**
-   * @type {import('.').Implements<typeof import('ipfs-core/src/components/version')>}
+   * @type {RootAPI["version"]}
    */
   async function version (options = {}) {
     const res = await api.post('version', {
@@ -24520,6 +23573,7 @@ module.exports = configure(api => {
       headers: options.headers
     })
 
+    // @ts-ignore server output is not typed
     return toCamel(await res.json())
   }
 
@@ -24529,79 +23583,1075 @@ module.exports = configure(api => {
 
 /***/ }),
 
-/***/ 6278:
-/***/ ((module) => {
+/***/ 9811:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-/**
- * @typedef {{ [key: string]: any }} Extensions
- * @typedef {Error} Err
- * @property {string} message
- */
+const {
+  Data: PBData
+} = __nccwpck_require__(8699)
+const errcode = __nccwpck_require__(2997)
 
 /**
- *
- * @param {Error} obj
- * @param {Extensions} props
- * @returns {Error & Extensions}
+ * @typedef {import('./types').Mtime} Mtime
+ * @typedef {import('./types').MtimeLike} MtimeLike
  */
-function assign(obj, props) {
-    for (const key in props) {
-        Object.defineProperty(obj, key, {
-            value: props[key],
-            enumerable: true,
-            configurable: true,
-        });
-    }
 
-    return obj;
+const types = [
+  'raw',
+  'directory',
+  'file',
+  'metadata',
+  'symlink',
+  'hamt-sharded-directory'
+]
+
+const dirTypes = [
+  'directory',
+  'hamt-sharded-directory'
+]
+
+const DEFAULT_FILE_MODE = parseInt('0644', 8)
+const DEFAULT_DIRECTORY_MODE = parseInt('0755', 8)
+
+/**
+ * @param {string | number | undefined} [mode]
+ */
+function parseMode (mode) {
+  if (mode == null) {
+    return undefined
+  }
+
+  if (typeof mode === 'number') {
+    return mode & 0xFFF
+  }
+
+  mode = mode.toString()
+
+  if (mode.substring(0, 1) === '0') {
+    // octal string
+    return parseInt(mode, 8) & 0xFFF
+  }
+
+  // decimal string
+  return parseInt(mode, 10) & 0xFFF
 }
 
 /**
- *
- * @param {any} err - An Error
- * @param {string|Extensions} code - A string code or props to set on the error
- * @param {Extensions} [props] - Props to set on the error
- * @returns {Error & Extensions}
+ * @param {any} input
  */
-function createError(err, code, props) {
-    if (!err || typeof err === 'string') {
-        throw new TypeError('Please pass an Error to err-code');
+function parseMtime (input) {
+  if (input == null) {
+    return undefined
+  }
+
+  /** @type {Mtime | undefined} */
+  let mtime
+
+  // { secs, nsecs }
+  if (input.secs != null) {
+    mtime = {
+      secs: input.secs,
+      nsecs: input.nsecs
     }
+  }
 
-    if (!props) {
-        props = {};
+  // UnixFS TimeSpec
+  if (input.Seconds != null) {
+    mtime = {
+      secs: input.Seconds,
+      nsecs: input.FractionalNanoseconds
     }
+  }
 
-    if (typeof code === 'object') {
-        props = code;
-        code = '';
+  // process.hrtime()
+  if (Array.isArray(input)) {
+    mtime = {
+      secs: input[0],
+      nsecs: input[1]
     }
+  }
 
-    if (code) {
-        props.code = code;
+  // Javascript Date
+  if (input instanceof Date) {
+    const ms = input.getTime()
+    const secs = Math.floor(ms / 1000)
+
+    mtime = {
+      secs: secs,
+      nsecs: (ms - (secs * 1000)) * 1000
     }
+  }
 
-    try {
-        return assign(err, props);
-    } catch (_) {
-        props.message = err.message;
-        props.stack = err.stack;
+  /*
+  TODO: https://github.com/ipfs/aegir/issues/487
 
-        const ErrClass = function () {};
+  // process.hrtime.bigint()
+  if (input instanceof BigInt) {
+    const secs = input / BigInt(1e9)
+    const nsecs = input - (secs * BigInt(1e9))
 
-        ErrClass.prototype = Object.create(Object.getPrototypeOf(err));
-
-        // @ts-ignore
-        const output = assign(new ErrClass(), props);
-
-        return output;
+    mtime = {
+      secs: parseInt(secs.toString()),
+      nsecs: parseInt(nsecs.toString())
     }
+  }
+  */
+
+  if (!Object.prototype.hasOwnProperty.call(mtime, 'secs')) {
+    return undefined
+  }
+
+  if (mtime != null && mtime.nsecs != null && (mtime.nsecs < 0 || mtime.nsecs > 999999999)) {
+    throw errcode(new Error('mtime-nsecs must be within the range [0,999999999]'), 'ERR_INVALID_MTIME_NSECS')
+  }
+
+  return mtime
 }
 
-module.exports = createError;
+class Data {
+  /**
+   * Decode from protobuf https://github.com/ipfs/specs/blob/master/UNIXFS.md
+   *
+   * @param {Uint8Array} marshaled
+   */
+  static unmarshal (marshaled) {
+    const message = PBData.decode(marshaled)
+    const decoded = PBData.toObject(message, {
+      defaults: false,
+      arrays: true,
+      longs: Number,
+      objects: false
+    })
+
+    const data = new Data({
+      type: types[decoded.Type],
+      data: decoded.Data,
+      blockSizes: decoded.blocksizes,
+      mode: decoded.mode,
+      mtime: decoded.mtime
+        ? {
+            secs: decoded.mtime.Seconds,
+            nsecs: decoded.mtime.FractionalNanoseconds
+          }
+        : undefined
+    })
+
+    // make sure we honour the original mode
+    data._originalMode = decoded.mode || 0
+
+    return data
+  }
+
+  /**
+   * @param {object} [options]
+   * @param {string} [options.type='file']
+   * @param {Uint8Array} [options.data]
+   * @param {number[]} [options.blockSizes]
+   * @param {number} [options.hashType]
+   * @param {number} [options.fanout]
+   * @param {MtimeLike | null} [options.mtime]
+   * @param {number | string} [options.mode]
+   */
+  constructor (options = {
+    type: 'file'
+  }) {
+    const {
+      type,
+      data,
+      blockSizes,
+      hashType,
+      fanout,
+      mtime,
+      mode
+    } = options
+
+    if (type && !types.includes(type)) {
+      throw errcode(new Error('Type: ' + type + ' is not valid'), 'ERR_INVALID_TYPE')
+    }
+
+    this.type = type || 'file'
+    this.data = data
+    this.hashType = hashType
+    this.fanout = fanout
+
+    /** @type {number[]} */
+    this.blockSizes = blockSizes || []
+    this._originalMode = 0
+    this.mode = parseMode(mode)
+
+    if (mtime) {
+      this.mtime = parseMtime(mtime)
+
+      if (this.mtime && !this.mtime.nsecs) {
+        this.mtime.nsecs = 0
+      }
+    }
+  }
+
+  /**
+   * @param {number | undefined} mode
+   */
+  set mode (mode) {
+    this._mode = this.isDirectory() ? DEFAULT_DIRECTORY_MODE : DEFAULT_FILE_MODE
+
+    const parsedMode = parseMode(mode)
+
+    if (parsedMode !== undefined) {
+      this._mode = parsedMode
+    }
+  }
+
+  /**
+   * @returns {number | undefined}
+   */
+  get mode () {
+    return this._mode
+  }
+
+  isDirectory () {
+    return Boolean(this.type && dirTypes.includes(this.type))
+  }
+
+  /**
+   * @param {number} size
+   */
+  addBlockSize (size) {
+    this.blockSizes.push(size)
+  }
+
+  /**
+   * @param {number} index
+   */
+  removeBlockSize (index) {
+    this.blockSizes.splice(index, 1)
+  }
+
+  /**
+   * Returns `0` for directories or `data.length + sum(blockSizes)` for everything else
+   */
+  fileSize () {
+    if (this.isDirectory()) {
+      // dirs don't have file size
+      return 0
+    }
+
+    let sum = 0
+    this.blockSizes.forEach((size) => {
+      sum += size
+    })
+
+    if (this.data) {
+      sum += this.data.length
+    }
+
+    return sum
+  }
+
+  /**
+   * encode to protobuf Uint8Array
+   */
+  marshal () {
+    let type
+
+    switch (this.type) {
+      case 'raw': type = PBData.DataType.Raw; break
+      case 'directory': type = PBData.DataType.Directory; break
+      case 'file': type = PBData.DataType.File; break
+      case 'metadata': type = PBData.DataType.Metadata; break
+      case 'symlink': type = PBData.DataType.Symlink; break
+      case 'hamt-sharded-directory': type = PBData.DataType.HAMTShard; break
+      default:
+        throw errcode(new Error('Type: ' + type + ' is not valid'), 'ERR_INVALID_TYPE')
+    }
+
+    let data = this.data
+
+    if (!this.data || !this.data.length) {
+      data = undefined
+    }
+
+    let mode
+
+    if (this.mode != null) {
+      mode = (this._originalMode & 0xFFFFF000) | (parseMode(this.mode) || 0)
+
+      if (mode === DEFAULT_FILE_MODE && !this.isDirectory()) {
+        mode = undefined
+      }
+
+      if (mode === DEFAULT_DIRECTORY_MODE && this.isDirectory()) {
+        mode = undefined
+      }
+    }
+
+    let mtime
+
+    if (this.mtime != null) {
+      const parsed = parseMtime(this.mtime)
+
+      if (parsed) {
+        mtime = {
+          Seconds: parsed.secs,
+          FractionalNanoseconds: parsed.nsecs
+        }
+
+        if (mtime.FractionalNanoseconds === 0) {
+          delete mtime.FractionalNanoseconds
+        }
+      }
+    }
+
+    const pbData = {
+      Type: type,
+      Data: data,
+      filesize: this.isDirectory() ? undefined : this.fileSize(),
+      blocksizes: this.blockSizes,
+      hashType: this.hashType,
+      fanout: this.fanout,
+      mode,
+      mtime
+    }
+
+    return PBData.encode(pbData).finish()
+  }
+}
+
+module.exports = {
+  UnixFS: Data,
+  parseMode,
+  parseMtime
+}
+
+
+/***/ }),
+
+/***/ 8699:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+/*eslint-disable*/
+
+
+var $protobuf = __nccwpck_require__(6916);
+
+// Common aliases
+var $Reader = $protobuf.Reader, $Writer = $protobuf.Writer, $util = $protobuf.util;
+
+// Exported root namespace
+var $root = $protobuf.roots["ipfs-unixfs"] || ($protobuf.roots["ipfs-unixfs"] = {});
+
+$root.Data = (function() {
+
+    /**
+     * Properties of a Data.
+     * @exports IData
+     * @interface IData
+     * @property {Data.DataType} Type Data Type
+     * @property {Uint8Array|null} [Data] Data Data
+     * @property {number|null} [filesize] Data filesize
+     * @property {Array.<number>|null} [blocksizes] Data blocksizes
+     * @property {number|null} [hashType] Data hashType
+     * @property {number|null} [fanout] Data fanout
+     * @property {number|null} [mode] Data mode
+     * @property {IUnixTime|null} [mtime] Data mtime
+     */
+
+    /**
+     * Constructs a new Data.
+     * @exports Data
+     * @classdesc Represents a Data.
+     * @implements IData
+     * @constructor
+     * @param {IData=} [p] Properties to set
+     */
+    function Data(p) {
+        this.blocksizes = [];
+        if (p)
+            for (var ks = Object.keys(p), i = 0; i < ks.length; ++i)
+                if (p[ks[i]] != null)
+                    this[ks[i]] = p[ks[i]];
+    }
+
+    /**
+     * Data Type.
+     * @member {Data.DataType} Type
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.Type = 0;
+
+    /**
+     * Data Data.
+     * @member {Uint8Array} Data
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.Data = $util.newBuffer([]);
+
+    /**
+     * Data filesize.
+     * @member {number} filesize
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.filesize = $util.Long ? $util.Long.fromBits(0,0,true) : 0;
+
+    /**
+     * Data blocksizes.
+     * @member {Array.<number>} blocksizes
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.blocksizes = $util.emptyArray;
+
+    /**
+     * Data hashType.
+     * @member {number} hashType
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.hashType = $util.Long ? $util.Long.fromBits(0,0,true) : 0;
+
+    /**
+     * Data fanout.
+     * @member {number} fanout
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.fanout = $util.Long ? $util.Long.fromBits(0,0,true) : 0;
+
+    /**
+     * Data mode.
+     * @member {number} mode
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.mode = 0;
+
+    /**
+     * Data mtime.
+     * @member {IUnixTime|null|undefined} mtime
+     * @memberof Data
+     * @instance
+     */
+    Data.prototype.mtime = null;
+
+    /**
+     * Encodes the specified Data message. Does not implicitly {@link Data.verify|verify} messages.
+     * @function encode
+     * @memberof Data
+     * @static
+     * @param {IData} m Data message or plain object to encode
+     * @param {$protobuf.Writer} [w] Writer to encode to
+     * @returns {$protobuf.Writer} Writer
+     */
+    Data.encode = function encode(m, w) {
+        if (!w)
+            w = $Writer.create();
+        w.uint32(8).int32(m.Type);
+        if (m.Data != null && Object.hasOwnProperty.call(m, "Data"))
+            w.uint32(18).bytes(m.Data);
+        if (m.filesize != null && Object.hasOwnProperty.call(m, "filesize"))
+            w.uint32(24).uint64(m.filesize);
+        if (m.blocksizes != null && m.blocksizes.length) {
+            for (var i = 0; i < m.blocksizes.length; ++i)
+                w.uint32(32).uint64(m.blocksizes[i]);
+        }
+        if (m.hashType != null && Object.hasOwnProperty.call(m, "hashType"))
+            w.uint32(40).uint64(m.hashType);
+        if (m.fanout != null && Object.hasOwnProperty.call(m, "fanout"))
+            w.uint32(48).uint64(m.fanout);
+        if (m.mode != null && Object.hasOwnProperty.call(m, "mode"))
+            w.uint32(56).uint32(m.mode);
+        if (m.mtime != null && Object.hasOwnProperty.call(m, "mtime"))
+            $root.UnixTime.encode(m.mtime, w.uint32(66).fork()).ldelim();
+        return w;
+    };
+
+    /**
+     * Decodes a Data message from the specified reader or buffer.
+     * @function decode
+     * @memberof Data
+     * @static
+     * @param {$protobuf.Reader|Uint8Array} r Reader or buffer to decode from
+     * @param {number} [l] Message length if known beforehand
+     * @returns {Data} Data
+     * @throws {Error} If the payload is not a reader or valid buffer
+     * @throws {$protobuf.util.ProtocolError} If required fields are missing
+     */
+    Data.decode = function decode(r, l) {
+        if (!(r instanceof $Reader))
+            r = $Reader.create(r);
+        var c = l === undefined ? r.len : r.pos + l, m = new $root.Data();
+        while (r.pos < c) {
+            var t = r.uint32();
+            switch (t >>> 3) {
+            case 1:
+                m.Type = r.int32();
+                break;
+            case 2:
+                m.Data = r.bytes();
+                break;
+            case 3:
+                m.filesize = r.uint64();
+                break;
+            case 4:
+                if (!(m.blocksizes && m.blocksizes.length))
+                    m.blocksizes = [];
+                if ((t & 7) === 2) {
+                    var c2 = r.uint32() + r.pos;
+                    while (r.pos < c2)
+                        m.blocksizes.push(r.uint64());
+                } else
+                    m.blocksizes.push(r.uint64());
+                break;
+            case 5:
+                m.hashType = r.uint64();
+                break;
+            case 6:
+                m.fanout = r.uint64();
+                break;
+            case 7:
+                m.mode = r.uint32();
+                break;
+            case 8:
+                m.mtime = $root.UnixTime.decode(r, r.uint32());
+                break;
+            default:
+                r.skipType(t & 7);
+                break;
+            }
+        }
+        if (!m.hasOwnProperty("Type"))
+            throw $util.ProtocolError("missing required 'Type'", { instance: m });
+        return m;
+    };
+
+    /**
+     * Creates a Data message from a plain object. Also converts values to their respective internal types.
+     * @function fromObject
+     * @memberof Data
+     * @static
+     * @param {Object.<string,*>} d Plain object
+     * @returns {Data} Data
+     */
+    Data.fromObject = function fromObject(d) {
+        if (d instanceof $root.Data)
+            return d;
+        var m = new $root.Data();
+        switch (d.Type) {
+        case "Raw":
+        case 0:
+            m.Type = 0;
+            break;
+        case "Directory":
+        case 1:
+            m.Type = 1;
+            break;
+        case "File":
+        case 2:
+            m.Type = 2;
+            break;
+        case "Metadata":
+        case 3:
+            m.Type = 3;
+            break;
+        case "Symlink":
+        case 4:
+            m.Type = 4;
+            break;
+        case "HAMTShard":
+        case 5:
+            m.Type = 5;
+            break;
+        }
+        if (d.Data != null) {
+            if (typeof d.Data === "string")
+                $util.base64.decode(d.Data, m.Data = $util.newBuffer($util.base64.length(d.Data)), 0);
+            else if (d.Data.length)
+                m.Data = d.Data;
+        }
+        if (d.filesize != null) {
+            if ($util.Long)
+                (m.filesize = $util.Long.fromValue(d.filesize)).unsigned = true;
+            else if (typeof d.filesize === "string")
+                m.filesize = parseInt(d.filesize, 10);
+            else if (typeof d.filesize === "number")
+                m.filesize = d.filesize;
+            else if (typeof d.filesize === "object")
+                m.filesize = new $util.LongBits(d.filesize.low >>> 0, d.filesize.high >>> 0).toNumber(true);
+        }
+        if (d.blocksizes) {
+            if (!Array.isArray(d.blocksizes))
+                throw TypeError(".Data.blocksizes: array expected");
+            m.blocksizes = [];
+            for (var i = 0; i < d.blocksizes.length; ++i) {
+                if ($util.Long)
+                    (m.blocksizes[i] = $util.Long.fromValue(d.blocksizes[i])).unsigned = true;
+                else if (typeof d.blocksizes[i] === "string")
+                    m.blocksizes[i] = parseInt(d.blocksizes[i], 10);
+                else if (typeof d.blocksizes[i] === "number")
+                    m.blocksizes[i] = d.blocksizes[i];
+                else if (typeof d.blocksizes[i] === "object")
+                    m.blocksizes[i] = new $util.LongBits(d.blocksizes[i].low >>> 0, d.blocksizes[i].high >>> 0).toNumber(true);
+            }
+        }
+        if (d.hashType != null) {
+            if ($util.Long)
+                (m.hashType = $util.Long.fromValue(d.hashType)).unsigned = true;
+            else if (typeof d.hashType === "string")
+                m.hashType = parseInt(d.hashType, 10);
+            else if (typeof d.hashType === "number")
+                m.hashType = d.hashType;
+            else if (typeof d.hashType === "object")
+                m.hashType = new $util.LongBits(d.hashType.low >>> 0, d.hashType.high >>> 0).toNumber(true);
+        }
+        if (d.fanout != null) {
+            if ($util.Long)
+                (m.fanout = $util.Long.fromValue(d.fanout)).unsigned = true;
+            else if (typeof d.fanout === "string")
+                m.fanout = parseInt(d.fanout, 10);
+            else if (typeof d.fanout === "number")
+                m.fanout = d.fanout;
+            else if (typeof d.fanout === "object")
+                m.fanout = new $util.LongBits(d.fanout.low >>> 0, d.fanout.high >>> 0).toNumber(true);
+        }
+        if (d.mode != null) {
+            m.mode = d.mode >>> 0;
+        }
+        if (d.mtime != null) {
+            if (typeof d.mtime !== "object")
+                throw TypeError(".Data.mtime: object expected");
+            m.mtime = $root.UnixTime.fromObject(d.mtime);
+        }
+        return m;
+    };
+
+    /**
+     * Creates a plain object from a Data message. Also converts values to other types if specified.
+     * @function toObject
+     * @memberof Data
+     * @static
+     * @param {Data} m Data
+     * @param {$protobuf.IConversionOptions} [o] Conversion options
+     * @returns {Object.<string,*>} Plain object
+     */
+    Data.toObject = function toObject(m, o) {
+        if (!o)
+            o = {};
+        var d = {};
+        if (o.arrays || o.defaults) {
+            d.blocksizes = [];
+        }
+        if (o.defaults) {
+            d.Type = o.enums === String ? "Raw" : 0;
+            if (o.bytes === String)
+                d.Data = "";
+            else {
+                d.Data = [];
+                if (o.bytes !== Array)
+                    d.Data = $util.newBuffer(d.Data);
+            }
+            if ($util.Long) {
+                var n = new $util.Long(0, 0, true);
+                d.filesize = o.longs === String ? n.toString() : o.longs === Number ? n.toNumber() : n;
+            } else
+                d.filesize = o.longs === String ? "0" : 0;
+            if ($util.Long) {
+                var n = new $util.Long(0, 0, true);
+                d.hashType = o.longs === String ? n.toString() : o.longs === Number ? n.toNumber() : n;
+            } else
+                d.hashType = o.longs === String ? "0" : 0;
+            if ($util.Long) {
+                var n = new $util.Long(0, 0, true);
+                d.fanout = o.longs === String ? n.toString() : o.longs === Number ? n.toNumber() : n;
+            } else
+                d.fanout = o.longs === String ? "0" : 0;
+            d.mode = 0;
+            d.mtime = null;
+        }
+        if (m.Type != null && m.hasOwnProperty("Type")) {
+            d.Type = o.enums === String ? $root.Data.DataType[m.Type] : m.Type;
+        }
+        if (m.Data != null && m.hasOwnProperty("Data")) {
+            d.Data = o.bytes === String ? $util.base64.encode(m.Data, 0, m.Data.length) : o.bytes === Array ? Array.prototype.slice.call(m.Data) : m.Data;
+        }
+        if (m.filesize != null && m.hasOwnProperty("filesize")) {
+            if (typeof m.filesize === "number")
+                d.filesize = o.longs === String ? String(m.filesize) : m.filesize;
+            else
+                d.filesize = o.longs === String ? $util.Long.prototype.toString.call(m.filesize) : o.longs === Number ? new $util.LongBits(m.filesize.low >>> 0, m.filesize.high >>> 0).toNumber(true) : m.filesize;
+        }
+        if (m.blocksizes && m.blocksizes.length) {
+            d.blocksizes = [];
+            for (var j = 0; j < m.blocksizes.length; ++j) {
+                if (typeof m.blocksizes[j] === "number")
+                    d.blocksizes[j] = o.longs === String ? String(m.blocksizes[j]) : m.blocksizes[j];
+                else
+                    d.blocksizes[j] = o.longs === String ? $util.Long.prototype.toString.call(m.blocksizes[j]) : o.longs === Number ? new $util.LongBits(m.blocksizes[j].low >>> 0, m.blocksizes[j].high >>> 0).toNumber(true) : m.blocksizes[j];
+            }
+        }
+        if (m.hashType != null && m.hasOwnProperty("hashType")) {
+            if (typeof m.hashType === "number")
+                d.hashType = o.longs === String ? String(m.hashType) : m.hashType;
+            else
+                d.hashType = o.longs === String ? $util.Long.prototype.toString.call(m.hashType) : o.longs === Number ? new $util.LongBits(m.hashType.low >>> 0, m.hashType.high >>> 0).toNumber(true) : m.hashType;
+        }
+        if (m.fanout != null && m.hasOwnProperty("fanout")) {
+            if (typeof m.fanout === "number")
+                d.fanout = o.longs === String ? String(m.fanout) : m.fanout;
+            else
+                d.fanout = o.longs === String ? $util.Long.prototype.toString.call(m.fanout) : o.longs === Number ? new $util.LongBits(m.fanout.low >>> 0, m.fanout.high >>> 0).toNumber(true) : m.fanout;
+        }
+        if (m.mode != null && m.hasOwnProperty("mode")) {
+            d.mode = m.mode;
+        }
+        if (m.mtime != null && m.hasOwnProperty("mtime")) {
+            d.mtime = $root.UnixTime.toObject(m.mtime, o);
+        }
+        return d;
+    };
+
+    /**
+     * Converts this Data to JSON.
+     * @function toJSON
+     * @memberof Data
+     * @instance
+     * @returns {Object.<string,*>} JSON object
+     */
+    Data.prototype.toJSON = function toJSON() {
+        return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+    };
+
+    /**
+     * DataType enum.
+     * @name Data.DataType
+     * @enum {number}
+     * @property {number} Raw=0 Raw value
+     * @property {number} Directory=1 Directory value
+     * @property {number} File=2 File value
+     * @property {number} Metadata=3 Metadata value
+     * @property {number} Symlink=4 Symlink value
+     * @property {number} HAMTShard=5 HAMTShard value
+     */
+    Data.DataType = (function() {
+        var valuesById = {}, values = Object.create(valuesById);
+        values[valuesById[0] = "Raw"] = 0;
+        values[valuesById[1] = "Directory"] = 1;
+        values[valuesById[2] = "File"] = 2;
+        values[valuesById[3] = "Metadata"] = 3;
+        values[valuesById[4] = "Symlink"] = 4;
+        values[valuesById[5] = "HAMTShard"] = 5;
+        return values;
+    })();
+
+    return Data;
+})();
+
+$root.UnixTime = (function() {
+
+    /**
+     * Properties of an UnixTime.
+     * @exports IUnixTime
+     * @interface IUnixTime
+     * @property {number} Seconds UnixTime Seconds
+     * @property {number|null} [FractionalNanoseconds] UnixTime FractionalNanoseconds
+     */
+
+    /**
+     * Constructs a new UnixTime.
+     * @exports UnixTime
+     * @classdesc Represents an UnixTime.
+     * @implements IUnixTime
+     * @constructor
+     * @param {IUnixTime=} [p] Properties to set
+     */
+    function UnixTime(p) {
+        if (p)
+            for (var ks = Object.keys(p), i = 0; i < ks.length; ++i)
+                if (p[ks[i]] != null)
+                    this[ks[i]] = p[ks[i]];
+    }
+
+    /**
+     * UnixTime Seconds.
+     * @member {number} Seconds
+     * @memberof UnixTime
+     * @instance
+     */
+    UnixTime.prototype.Seconds = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+    /**
+     * UnixTime FractionalNanoseconds.
+     * @member {number} FractionalNanoseconds
+     * @memberof UnixTime
+     * @instance
+     */
+    UnixTime.prototype.FractionalNanoseconds = 0;
+
+    /**
+     * Encodes the specified UnixTime message. Does not implicitly {@link UnixTime.verify|verify} messages.
+     * @function encode
+     * @memberof UnixTime
+     * @static
+     * @param {IUnixTime} m UnixTime message or plain object to encode
+     * @param {$protobuf.Writer} [w] Writer to encode to
+     * @returns {$protobuf.Writer} Writer
+     */
+    UnixTime.encode = function encode(m, w) {
+        if (!w)
+            w = $Writer.create();
+        w.uint32(8).int64(m.Seconds);
+        if (m.FractionalNanoseconds != null && Object.hasOwnProperty.call(m, "FractionalNanoseconds"))
+            w.uint32(21).fixed32(m.FractionalNanoseconds);
+        return w;
+    };
+
+    /**
+     * Decodes an UnixTime message from the specified reader or buffer.
+     * @function decode
+     * @memberof UnixTime
+     * @static
+     * @param {$protobuf.Reader|Uint8Array} r Reader or buffer to decode from
+     * @param {number} [l] Message length if known beforehand
+     * @returns {UnixTime} UnixTime
+     * @throws {Error} If the payload is not a reader or valid buffer
+     * @throws {$protobuf.util.ProtocolError} If required fields are missing
+     */
+    UnixTime.decode = function decode(r, l) {
+        if (!(r instanceof $Reader))
+            r = $Reader.create(r);
+        var c = l === undefined ? r.len : r.pos + l, m = new $root.UnixTime();
+        while (r.pos < c) {
+            var t = r.uint32();
+            switch (t >>> 3) {
+            case 1:
+                m.Seconds = r.int64();
+                break;
+            case 2:
+                m.FractionalNanoseconds = r.fixed32();
+                break;
+            default:
+                r.skipType(t & 7);
+                break;
+            }
+        }
+        if (!m.hasOwnProperty("Seconds"))
+            throw $util.ProtocolError("missing required 'Seconds'", { instance: m });
+        return m;
+    };
+
+    /**
+     * Creates an UnixTime message from a plain object. Also converts values to their respective internal types.
+     * @function fromObject
+     * @memberof UnixTime
+     * @static
+     * @param {Object.<string,*>} d Plain object
+     * @returns {UnixTime} UnixTime
+     */
+    UnixTime.fromObject = function fromObject(d) {
+        if (d instanceof $root.UnixTime)
+            return d;
+        var m = new $root.UnixTime();
+        if (d.Seconds != null) {
+            if ($util.Long)
+                (m.Seconds = $util.Long.fromValue(d.Seconds)).unsigned = false;
+            else if (typeof d.Seconds === "string")
+                m.Seconds = parseInt(d.Seconds, 10);
+            else if (typeof d.Seconds === "number")
+                m.Seconds = d.Seconds;
+            else if (typeof d.Seconds === "object")
+                m.Seconds = new $util.LongBits(d.Seconds.low >>> 0, d.Seconds.high >>> 0).toNumber();
+        }
+        if (d.FractionalNanoseconds != null) {
+            m.FractionalNanoseconds = d.FractionalNanoseconds >>> 0;
+        }
+        return m;
+    };
+
+    /**
+     * Creates a plain object from an UnixTime message. Also converts values to other types if specified.
+     * @function toObject
+     * @memberof UnixTime
+     * @static
+     * @param {UnixTime} m UnixTime
+     * @param {$protobuf.IConversionOptions} [o] Conversion options
+     * @returns {Object.<string,*>} Plain object
+     */
+    UnixTime.toObject = function toObject(m, o) {
+        if (!o)
+            o = {};
+        var d = {};
+        if (o.defaults) {
+            if ($util.Long) {
+                var n = new $util.Long(0, 0, false);
+                d.Seconds = o.longs === String ? n.toString() : o.longs === Number ? n.toNumber() : n;
+            } else
+                d.Seconds = o.longs === String ? "0" : 0;
+            d.FractionalNanoseconds = 0;
+        }
+        if (m.Seconds != null && m.hasOwnProperty("Seconds")) {
+            if (typeof m.Seconds === "number")
+                d.Seconds = o.longs === String ? String(m.Seconds) : m.Seconds;
+            else
+                d.Seconds = o.longs === String ? $util.Long.prototype.toString.call(m.Seconds) : o.longs === Number ? new $util.LongBits(m.Seconds.low >>> 0, m.Seconds.high >>> 0).toNumber() : m.Seconds;
+        }
+        if (m.FractionalNanoseconds != null && m.hasOwnProperty("FractionalNanoseconds")) {
+            d.FractionalNanoseconds = m.FractionalNanoseconds;
+        }
+        return d;
+    };
+
+    /**
+     * Converts this UnixTime to JSON.
+     * @function toJSON
+     * @memberof UnixTime
+     * @instance
+     * @returns {Object.<string,*>} JSON object
+     */
+    UnixTime.prototype.toJSON = function toJSON() {
+        return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+    };
+
+    return UnixTime;
+})();
+
+$root.Metadata = (function() {
+
+    /**
+     * Properties of a Metadata.
+     * @exports IMetadata
+     * @interface IMetadata
+     * @property {string|null} [MimeType] Metadata MimeType
+     */
+
+    /**
+     * Constructs a new Metadata.
+     * @exports Metadata
+     * @classdesc Represents a Metadata.
+     * @implements IMetadata
+     * @constructor
+     * @param {IMetadata=} [p] Properties to set
+     */
+    function Metadata(p) {
+        if (p)
+            for (var ks = Object.keys(p), i = 0; i < ks.length; ++i)
+                if (p[ks[i]] != null)
+                    this[ks[i]] = p[ks[i]];
+    }
+
+    /**
+     * Metadata MimeType.
+     * @member {string} MimeType
+     * @memberof Metadata
+     * @instance
+     */
+    Metadata.prototype.MimeType = "";
+
+    /**
+     * Encodes the specified Metadata message. Does not implicitly {@link Metadata.verify|verify} messages.
+     * @function encode
+     * @memberof Metadata
+     * @static
+     * @param {IMetadata} m Metadata message or plain object to encode
+     * @param {$protobuf.Writer} [w] Writer to encode to
+     * @returns {$protobuf.Writer} Writer
+     */
+    Metadata.encode = function encode(m, w) {
+        if (!w)
+            w = $Writer.create();
+        if (m.MimeType != null && Object.hasOwnProperty.call(m, "MimeType"))
+            w.uint32(10).string(m.MimeType);
+        return w;
+    };
+
+    /**
+     * Decodes a Metadata message from the specified reader or buffer.
+     * @function decode
+     * @memberof Metadata
+     * @static
+     * @param {$protobuf.Reader|Uint8Array} r Reader or buffer to decode from
+     * @param {number} [l] Message length if known beforehand
+     * @returns {Metadata} Metadata
+     * @throws {Error} If the payload is not a reader or valid buffer
+     * @throws {$protobuf.util.ProtocolError} If required fields are missing
+     */
+    Metadata.decode = function decode(r, l) {
+        if (!(r instanceof $Reader))
+            r = $Reader.create(r);
+        var c = l === undefined ? r.len : r.pos + l, m = new $root.Metadata();
+        while (r.pos < c) {
+            var t = r.uint32();
+            switch (t >>> 3) {
+            case 1:
+                m.MimeType = r.string();
+                break;
+            default:
+                r.skipType(t & 7);
+                break;
+            }
+        }
+        return m;
+    };
+
+    /**
+     * Creates a Metadata message from a plain object. Also converts values to their respective internal types.
+     * @function fromObject
+     * @memberof Metadata
+     * @static
+     * @param {Object.<string,*>} d Plain object
+     * @returns {Metadata} Metadata
+     */
+    Metadata.fromObject = function fromObject(d) {
+        if (d instanceof $root.Metadata)
+            return d;
+        var m = new $root.Metadata();
+        if (d.MimeType != null) {
+            m.MimeType = String(d.MimeType);
+        }
+        return m;
+    };
+
+    /**
+     * Creates a plain object from a Metadata message. Also converts values to other types if specified.
+     * @function toObject
+     * @memberof Metadata
+     * @static
+     * @param {Metadata} m Metadata
+     * @param {$protobuf.IConversionOptions} [o] Conversion options
+     * @returns {Object.<string,*>} Plain object
+     */
+    Metadata.toObject = function toObject(m, o) {
+        if (!o)
+            o = {};
+        var d = {};
+        if (o.defaults) {
+            d.MimeType = "";
+        }
+        if (m.MimeType != null && m.hasOwnProperty("MimeType")) {
+            d.MimeType = m.MimeType;
+        }
+        return d;
+    };
+
+    /**
+     * Converts this Metadata to JSON.
+     * @function toJSON
+     * @memberof Metadata
+     * @instance
+     * @returns {Object.<string,*>} JSON object
+     */
+    Metadata.prototype.toJSON = function toJSON() {
+        return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+    };
+
+    return Metadata;
+})();
+
+module.exports = $root;
 
 
 /***/ }),
@@ -24614,6 +24664,7 @@ module.exports = createError;
 const isElectron = __nccwpck_require__(4293)
 
 const IS_ENV_WITH_DOM = typeof window === 'object' && typeof document === 'object' && document.nodeType === 9
+// @ts-ignore
 const IS_ELECTRON = isElectron()
 const IS_BROWSER = IS_ENV_WITH_DOM && !IS_ELECTRON
 const IS_ELECTRON_MAIN = IS_ELECTRON && !IS_ENV_WITH_DOM
@@ -24622,6 +24673,7 @@ const IS_NODE =  true && typeof process !== 'undefined' && typeof process.releas
 // @ts-ignore - we either ignore worker scope or dom scope
 const IS_WEBWORKER = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope
 const IS_TEST = typeof process !== 'undefined' && typeof process.env !== 'undefined' && process.env.NODE_ENV === 'test'
+const IS_REACT_NATIVE = typeof navigator !== 'undefined' && navigator.product === 'ReactNative'
 
 module.exports = {
   isTest: IS_TEST,
@@ -24634,7 +24686,8 @@ module.exports = {
    */
   isBrowser: IS_BROWSER,
   isWebWorker: IS_WEBWORKER,
-  isEnvWithDom: IS_ENV_WITH_DOM
+  isEnvWithDom: IS_ENV_WITH_DOM,
+  isReactNative: IS_REACT_NATIVE
 }
 
 
@@ -24664,10 +24717,11 @@ if (isElectronMain) {
 "use strict";
 
 
-const fs = __nccwpck_require__(5630)
+const fsp = __nccwpck_require__(5747).promises
+const fs = __nccwpck_require__(5747)
 const glob = __nccwpck_require__(402)
 const Path = __nccwpck_require__(5622)
-const errCode = __nccwpck_require__(6278)
+const errCode = __nccwpck_require__(2997)
 
 /**
  * Create an async iterator that yields paths that match requested file paths.
@@ -24681,7 +24735,7 @@ const errCode = __nccwpck_require__(6278)
  * @param {boolean} [options.preserveMode] - preserve mode
  * @param {boolean} [options.preserveMtime] - preserve mtime
  * @param {number} [options.mode] - mode to use - if preserveMode is true this will be ignored
- * @param {Date} [options.mtime] - mtime to use - if preserveMtime is true this will be ignored
+ * @param {import('ipfs-unixfs').MtimeLike} [options.mtime] - mtime to use - if preserveMtime is true this will be ignored
  * @yields {Object} File objects in the form `{ path: String, content: AsyncIterator<Buffer> }`
  */
 module.exports = async function * globSource (paths, options) {
@@ -24711,7 +24765,7 @@ module.exports = async function * globSource (paths, options) {
     }
 
     const absolutePath = Path.resolve(process.cwd(), path)
-    const stat = await fs.stat(absolutePath)
+    const stat = await fsp.stat(absolutePath)
     const prefix = Path.dirname(absolutePath)
 
     let mode = options.mode
@@ -24781,7 +24835,7 @@ async function * toGlobSource ({ path, type, prefix, mode, mtime, preserveMode, 
   })
 
   for await (const p of glob(path, '**/*', globOptions)) {
-    const stat = await fs.stat(p)
+    const stat = await fsp.stat(p)
 
     if (preserveMode || preserveMtime) {
       if (preserveMode) {
@@ -24860,15 +24914,13 @@ const { fetch, Request, Headers } = __nccwpck_require__(8435)
 const { TimeoutError, HTTPError } = __nccwpck_require__(220)
 const merge = __nccwpck_require__(2555).bind({ ignoreUndefined: true })
 const { URL, URLSearchParams } = __nccwpck_require__(1286)
-const TextDecoder = __nccwpck_require__(3767)
 const { AbortController } = __nccwpck_require__(2092)
 const anySignal = __nccwpck_require__(9428)
 
 /**
- * @typedef {import('electron-fetch').Response} Response
  * @typedef {import('stream').Readable} NodeReadableStream
- * @typedef {import('stream').Duplex} NodeDuplexStream
  * @typedef {import('./types').HTTPOptions} HTTPOptions
+ * @typedef {import('./types').ExtendedResponse} ExtendedResponse
  */
 
 /**
@@ -24944,7 +24996,7 @@ class HTTP {
    *
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
+   * @returns {Promise<ExtendedResponse>}
    */
   async fetch (resource, options = {}) {
     /** @type {HTTPOptions} */
@@ -25024,7 +25076,6 @@ class HTTP {
   /**
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
    */
   post (resource, options = {}) {
     return this.fetch(resource, { ...options, method: 'POST' })
@@ -25033,7 +25084,6 @@ class HTTP {
   /**
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
    */
   get (resource, options = {}) {
     return this.fetch(resource, { ...options, method: 'GET' })
@@ -25042,7 +25092,6 @@ class HTTP {
   /**
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
    */
   put (resource, options = {}) {
     return this.fetch(resource, { ...options, method: 'PUT' })
@@ -25051,7 +25100,6 @@ class HTTP {
   /**
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
    */
   delete (resource, options = {}) {
     return this.fetch(resource, { ...options, method: 'DELETE' })
@@ -25060,7 +25108,6 @@ class HTTP {
   /**
    * @param {string | Request} resource
    * @param {HTTPOptions} options
-   * @returns {Promise<Response>}
    */
   options (resource, options = {}) {
     return this.fetch(resource, { ...options, method: 'OPTIONS' })
@@ -25191,35 +25238,30 @@ HTTP.streamToAsyncIterator = fromStream
 /**
  * @param {string | Request} resource
  * @param {HTTPOptions} [options]
- * @returns {Promise<Response>}
  */
 HTTP.post = (resource, options) => new HTTP(options).post(resource, options)
 
 /**
  * @param {string | Request} resource
  * @param {HTTPOptions} [options]
- * @returns {Promise<Response>}
  */
 HTTP.get = (resource, options) => new HTTP(options).get(resource, options)
 
 /**
  * @param {string | Request} resource
  * @param {HTTPOptions} [options]
- * @returns {Promise<Response>}
  */
 HTTP.put = (resource, options) => new HTTP(options).put(resource, options)
 
 /**
  * @param {string | Request} resource
  * @param {HTTPOptions} [options]
- * @returns {Promise<Response>}
  */
 HTTP.delete = (resource, options) => new HTTP(options).delete(resource, options)
 
 /**
  * @param {string | Request} resource
  * @param {HTTPOptions} [options]
- * @returns {Promise<Response>}
  */
 HTTP.options = (resource, options) => new HTTP(options).options(resource, options)
 
@@ -25252,7 +25294,7 @@ exports.AbortError = AbortError
 
 class HTTPError extends Error {
   /**
-   * @param {import('electron-fetch').Response} response
+   * @param {Response} response
    */
   constructor (response) {
     super(response.statusText)
@@ -25407,8 +25449,7 @@ class ResponseWithURL extends Response {
 module.exports = {
   fetch: fetchWith,
   Request,
-  Headers,
-  ResponseWithURL
+  Headers
 }
 
 
@@ -25420,9 +25461,9 @@ module.exports = {
 "use strict";
 
 
-// Electron has `XMLHttpRequest` and should get the browser implementation
-// instead of node.
 if (typeof XMLHttpRequest === 'function') {
+  // Electron has `XMLHttpRequest` and should get the browser implementation
+  // instead of node.
   module.exports = __nccwpck_require__(6908)
 } else {
   module.exports = __nccwpck_require__(9720)
@@ -25436,13 +25477,11 @@ if (typeof XMLHttpRequest === 'function') {
 
 "use strict";
 
-
 const { Request, Response, Headers, default: nativeFetch } = __nccwpck_require__(1912)
 // @ts-ignore
 const toStream = __nccwpck_require__(3259)
 const { Buffer } = __nccwpck_require__(3407)
 /**
- * @typedef {import('electron-fetch').BodyInit} BodyInit
  * @typedef {import('stream').Readable} NodeReadableStream
  *
  * @typedef {import('../types').FetchOptions} FetchOptions
@@ -25484,8 +25523,7 @@ const withUploadProgress = (options) => {
 }
 
 /**
- * @param {BodyInit} input
- * @returns {Blob | FormData | URLSearchParams | ReadableStream<Uint8Array> | string | NodeReadableStream | Buffer}
+ * @param {BodyInit | NodeReadableStream} input
  */
 const normalizeBody = (input) => {
   if (input instanceof ArrayBuffer) {
@@ -25532,17 +25570,6 @@ module.exports = {
   Request,
   Headers
 }
-
-
-/***/ }),
-
-/***/ 3767:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-module.exports = __nccwpck_require__(2287).TextDecoder
 
 
 /***/ }),
@@ -25658,15 +25685,27 @@ module.exports = Block
 /***/ }),
 
 /***/ 4448:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-exports.util = __nccwpck_require__(7465)
-exports.resolver = __nccwpck_require__(7882)
-exports.codec = exports.util.codec
-exports.defaultHashAlg = exports.util.defaultHashAlg
+const util = __nccwpck_require__(7465)
+const resolver = __nccwpck_require__(7882)
+
+/**
+ * @typedef {import('interface-ipld-format').Format<object>} ObjectFormat
+ */
+
+/**
+ * @type {ObjectFormat}
+ */
+module.exports = {
+  util,
+  resolver,
+  codec: util.codec,
+  defaultHashAlg: util.defaultHashAlg
+}
 
 
 /***/ }),
@@ -25689,13 +25728,13 @@ const util = __nccwpck_require__(7465)
  * @param {Uint8Array} binaryBlob - Binary representation of a CBOR block
  * @param {string} [path='/'] - Path that should be resolved
  */
-exports.resolve = (binaryBlob, path) => {
+exports.resolve = (binaryBlob, path = '') => {
   let node = util.deserialize(binaryBlob)
 
   const parts = path.split('/').filter(Boolean)
   while (parts.length) {
     const key = parts.shift()
-    if (node[key] === undefined) {
+    if (!key || !(key in node)) {
       throw new Error(`Object has no property '${key}'`)
     }
 
@@ -25714,17 +25753,25 @@ exports.resolve = (binaryBlob, path) => {
   }
 }
 
+/**
+ * @param {any} node
+ * @param {string} [path]
+ * @returns {Generator<string, void, undefined>}
+ */
 const traverse = function * (node, path) {
   // Traverse only objects and arrays
-  if (node instanceof Uint8Array || CID.isCID(node) || typeof node === 'string' ||
-      node === null) {
+  if (node instanceof Uint8Array || CID.isCID(node) || typeof node === 'string' || node === null) {
     return
   }
+
   for (const item of Object.keys(node)) {
     const nextpath = path === undefined ? item : path + '/' + item
     yield nextpath
     yield * traverse(node[item], nextpath)
   }
+
+  // to stop eslint and tsc fighting
+  return undefined
 }
 
 /**
@@ -25749,30 +25796,48 @@ exports.tree = function * (binaryBlob) {
 "use strict";
 
 
+// @ts-ignore TODO: switch to cborg
 const cbor = __nccwpck_require__(5943)
 const multicodec = __nccwpck_require__(7081)
 const multihashing = __nccwpck_require__(7761)
+const { multihash } = multihashing
 const CID = __nccwpck_require__(9016)
+// @ts-ignore
 const isCircular = __nccwpck_require__(9961)
 const uint8ArrayConcat = __nccwpck_require__(7952)
 const uint8ArrayFromString = __nccwpck_require__(828)
 
+/**
+ * @typedef {import('cids').CIDVersion} CIDVersion
+ * @typedef {import('multihashing-async').multihash.HashCode} HashCode
+ */
+
 // https://github.com/ipfs/go-ipfs/issues/3570#issuecomment-273931692
 const CID_CBOR_TAG = 42
 
+/**
+ * @param {CID | string} cid
+ */
 function tagCID (cid) {
+  let buf
+
   if (typeof cid === 'string') {
-    cid = new CID(cid).bytes
+    buf = new CID(cid).bytes
   } else if (CID.isCID(cid)) {
-    cid = cid.bytes
+    buf = cid.bytes
+  } else {
+    throw new Error('Could not tag CID - was not string or CID')
   }
 
   return new cbor.Tagged(CID_CBOR_TAG, uint8ArrayConcat([
     uint8ArrayFromString('00', 'base16'), // thanks jdag
-    cid
-  ], 1 + cid.length))
+    buf
+  ], 1 + buf.length))
 }
 
+/**
+ * @param {any} dagNode
+ */
 function replaceCIDbyTAG (dagNode) {
   let circular
   try {
@@ -25784,6 +25849,10 @@ function replaceCIDbyTAG (dagNode) {
     throw new Error('The object passed has circular references')
   }
 
+  /**
+   * @param {any} obj
+   * @returns {any}
+   */
   function transform (obj) {
     if (!obj || obj instanceof Uint8Array || typeof obj === 'string') {
       return obj
@@ -25801,6 +25870,7 @@ function replaceCIDbyTAG (dagNode) {
 
     if (keys.length > 0) {
       // Recursive transform
+      /** @type {Record<string, any>} */
       const out = {}
       keys.forEach((key) => {
         if (typeof obj[key] === 'object') {
@@ -25819,9 +25889,12 @@ function replaceCIDbyTAG (dagNode) {
 }
 
 const codec = multicodec.DAG_CBOR
-const defaultHashAlg = multicodec.SHA2_256
+const defaultHashAlg = multihash.names['sha2-256']
 
 const defaultTags = {
+  /**
+   * @param {Uint8Array} val
+   */
   [CID_CBOR_TAG]: (val) => {
     // remove that 0
     val = val.slice(1)
@@ -25832,7 +25905,8 @@ const defaultSize = 64 * 1024 // current decoder heap size, 64 Kb
 let currentSize = defaultSize
 const defaultMaxSize = 64 * 1024 * 1024 // max heap size when auto-growing, 64 Mb
 let maxSize = defaultMaxSize
-let decoder = null
+/** @type {cbor.Decoder} */
+let decoder
 
 /**
  * Configure the underlying CBOR decoder.
@@ -25890,7 +25964,7 @@ function serialize (node) {
  * Deserialize CBOR block into the internal representation.
  *
  * @param {Uint8Array} data - Binary representation of a CBOR block
- * @returns {Object} - An object that conforms to the IPLD Data Model
+ * @returns {any} - An object that conforms to the IPLD Data Model
  */
 function deserialize (data) {
   if (data.length > currentSize && data.length <= maxSize) {
@@ -25914,19 +25988,21 @@ function deserialize (data) {
 /**
  * Calculate the CID of the binary blob.
  *
- * @param {Object} binaryBlob - Encoded IPLD Node
+ * @param {Uint8Array} binaryBlob - Encoded IPLD Node
  * @param {Object} [userOptions] - Options to create the CID
- * @param {number} [userOptions.cidVersion=1] - CID version number
- * @param {string} [userOptions.hashAlg] - Defaults to the defaultHashAlg of the format
- * @returns {Promise.<CID>}
+ * @param {CIDVersion} [userOptions.cidVersion=1] - CID version number
+ * @param {HashCode} [userOptions.hashAlg=multihash.names['sha2-256']] - Defaults to the defaultHashAlg of the format
  */
-async function cid (binaryBlob, userOptions) {
-  const defaultOptions = { cidVersion: 1, hashAlg: defaultHashAlg }
-  const options = Object.assign(defaultOptions, userOptions)
+async function cid (binaryBlob, userOptions = {}) {
+  const options = {
+    cidVersion: userOptions.cidVersion == null ? 1 : userOptions.cidVersion,
+    hashAlg: userOptions.hashAlg == null ? module.exports.defaultHashAlg : userOptions.hashAlg
+  }
 
-  const multihash = await multihashing(binaryBlob, options.hashAlg)
-  const codecName = multicodec.getNameFromCode(codec)
-  const cid = new CID(options.cidVersion, codecName, multihash)
+  const hashName = multihash.codes[options.hashAlg]
+  const hash = await multihashing(binaryBlob, hashName)
+  const codecName = multicodec.getNameFromCode(module.exports.codec)
+  const cid = new CID(options.cidVersion, codecName, hash)
 
   return cid
 }
@@ -25943,1448 +26019,24 @@ module.exports = {
 
 /***/ }),
 
-/***/ 2286:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { encodeText } = __nccwpck_require__(4421)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import("./types").BaseName} BaseName */
-/** @typedef {import("./types").BaseCode} BaseCode */
-
-/**
- * Class to encode/decode in the supported Bases
- *
- */
-class Base {
-  /**
-   * @param {BaseName} name
-   * @param {BaseCode} code
-   * @param {CodecFactory} factory
-   * @param {string} alphabet
-   */
-  constructor (name, code, factory, alphabet) {
-    this.name = name
-    this.code = code
-    this.codeBuf = encodeText(this.code)
-    this.alphabet = alphabet
-    this.codec = factory(alphabet)
-  }
-
-  /**
-   * @param {Uint8Array} buf
-   * @returns {string}
-   */
-  encode (buf) {
-    return this.codec.encode(buf)
-  }
-
-  /**
-   * @param {string} string
-   * @returns {Uint8Array}
-   */
-  decode (string) {
-    for (const char of string) {
-      if (this.alphabet && this.alphabet.indexOf(char) < 0) {
-        throw new Error(`invalid character '${char}' in '${string}'`)
-      }
-    }
-    return this.codec.decode(string)
-  }
-}
-
-module.exports = Base
-
-
-/***/ }),
-
-/***/ 80:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const baseX = __nccwpck_require__(3841)
-const Base = __nccwpck_require__(2286)
-const { rfc4648 } = __nccwpck_require__(4063)
-const { decodeText, encodeText } = __nccwpck_require__(4421)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import('./types').Codec} Codec */
-/** @typedef {import('./types').BaseName} BaseName */
-/** @typedef {import('./types').BaseCode} BaseCode */
-
-/** @type {CodecFactory} */
-const identity = () => {
-  return {
-    encode: decodeText,
-    decode: encodeText
-  }
-}
-
-/**
- *
- * name, code, implementation, alphabet
- *
- * @type {Array<[BaseName, BaseCode, CodecFactory, string]>}
- */
-const constants = [
-  ['identity', '\x00', identity, ''],
-  ['base2', '0', rfc4648(1), '01'],
-  ['base8', '7', rfc4648(3), '01234567'],
-  ['base10', '9', baseX, '0123456789'],
-  ['base16', 'f', rfc4648(4), '0123456789abcdef'],
-  ['base16upper', 'F', rfc4648(4), '0123456789ABCDEF'],
-  ['base32hex', 'v', rfc4648(5), '0123456789abcdefghijklmnopqrstuv'],
-  ['base32hexupper', 'V', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV'],
-  ['base32hexpad', 't', rfc4648(5), '0123456789abcdefghijklmnopqrstuv='],
-  ['base32hexpadupper', 'T', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV='],
-  ['base32', 'b', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567'],
-  ['base32upper', 'B', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'],
-  ['base32pad', 'c', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567='],
-  ['base32padupper', 'C', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567='],
-  ['base32z', 'h', rfc4648(5), 'ybndrfg8ejkmcpqxot1uwisza345h769'],
-  ['base36', 'k', baseX, '0123456789abcdefghijklmnopqrstuvwxyz'],
-  ['base36upper', 'K', baseX, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
-  ['base58btc', 'z', baseX, '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'],
-  ['base58flickr', 'Z', baseX, '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'],
-  ['base64', 'm', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'],
-  ['base64pad', 'M', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='],
-  ['base64url', 'u', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'],
-  ['base64urlpad', 'U', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=']
-]
-
-/** @type {Record<BaseName,Base>} */
-const names = constants.reduce((prev, tupple) => {
-  prev[tupple[0]] = new Base(tupple[0], tupple[1], tupple[2], tupple[3])
-  return prev
-}, /** @type {Record<BaseName,Base>} */({}))
-
-/** @type {Record<BaseCode,Base>} */
-const codes = constants.reduce((prev, tupple) => {
-  prev[tupple[1]] = names[tupple[0]]
-  return prev
-}, /** @type {Record<BaseCode,Base>} */({}))
-
-module.exports = {
-  names,
-  codes
-}
-
-
-/***/ }),
-
-/***/ 4063:
-/***/ ((module) => {
-
-"use strict";
-
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-
-/**
- * @param {string} string
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {Uint8Array}
- */
-const decode = (string, alphabet, bitsPerChar) => {
-  // Build the character lookup table:
-  /** @type {Record<string, number>} */
-  const codes = {}
-  for (let i = 0; i < alphabet.length; ++i) {
-    codes[alphabet[i]] = i
-  }
-
-  // Count the padding bytes:
-  let end = string.length
-  while (string[end - 1] === '=') {
-    --end
-  }
-
-  // Allocate the output:
-  const out = new Uint8Array((end * bitsPerChar / 8) | 0)
-
-  // Parse the data:
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  let written = 0 // Next byte to write
-  for (let i = 0; i < end; ++i) {
-    // Read one character from the string:
-    const value = codes[string[i]]
-    if (value === undefined) {
-      throw new SyntaxError('Invalid character ' + string[i])
-    }
-
-    // Append the bits to the buffer:
-    buffer = (buffer << bitsPerChar) | value
-    bits += bitsPerChar
-
-    // Write out some bits if the buffer has a byte's worth:
-    if (bits >= 8) {
-      bits -= 8
-      out[written++] = 0xff & (buffer >> bits)
-    }
-  }
-
-  // Verify that we have received just enough bits:
-  if (bits >= bitsPerChar || 0xff & (buffer << (8 - bits))) {
-    throw new SyntaxError('Unexpected end of data')
-  }
-
-  return out
-}
-
-/**
- * @param {Uint8Array} data
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {string}
- */
-const encode = (data, alphabet, bitsPerChar) => {
-  const pad = alphabet[alphabet.length - 1] === '='
-  const mask = (1 << bitsPerChar) - 1
-  let out = ''
-
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  for (let i = 0; i < data.length; ++i) {
-    // Slurp data into the buffer:
-    buffer = (buffer << 8) | data[i]
-    bits += 8
-
-    // Write out as much as we can:
-    while (bits > bitsPerChar) {
-      bits -= bitsPerChar
-      out += alphabet[mask & (buffer >> bits)]
-    }
-  }
-
-  // Partial character:
-  if (bits) {
-    out += alphabet[mask & (buffer << (bitsPerChar - bits))]
-  }
-
-  // Add padding characters until we hit a byte boundary:
-  if (pad) {
-    while ((out.length * bitsPerChar) & 7) {
-      out += '='
-    }
-  }
-
-  return out
-}
-
-/**
- * RFC4648 Factory
- *
- * @param {number} bitsPerChar
- * @returns {CodecFactory}
- */
-const rfc4648 = (bitsPerChar) => (alphabet) => {
-  return {
-    /**
-     * @param {Uint8Array} input
-     * @returns {string}
-     */
-    encode (input) {
-      return encode(input, alphabet, bitsPerChar)
-    },
-    /**
-     * @param {string} input
-     * @returns {Uint8Array}
-     */
-    decode (input) {
-      return decode(input, alphabet, bitsPerChar)
-    }
-  }
-}
-
-module.exports = { rfc4648 }
-
-
-/***/ }),
-
-/***/ 4421:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-// @ts-ignore
-const { TextEncoder, TextDecoder } = __nccwpck_require__(2287)
-
-const textDecoder = new TextDecoder()
-/**
- * @param {ArrayBufferView|ArrayBuffer} bytes
- * @returns {string}
- */
-const decodeText = (bytes) => textDecoder.decode(bytes)
-
-const textEncoder = new TextEncoder()
-/**
- * @param {string} text
- * @returns {Uint8Array}
- */
-const encodeText = (text) => textEncoder.encode(text)
-
-/**
- * Returns a new Uint8Array created by concatenating the passed Arrays
- *
- * @param {Array<ArrayLike<number>>} arrs
- * @param {number} length
- * @returns {Uint8Array}
- */
-function concat (arrs, length) {
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrs) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = { decodeText, encodeText, concat }
-
-
-/***/ }),
-
-/***/ 21:
-/***/ ((module) => {
-
-"use strict";
-// DO NOT CHANGE THIS FILE. IT IS GENERATED BY tools/update-table.js
-/* eslint quote-props: off */
-
-
-/**
- * @type {import('./generated-types').NameNumberMap}
- */
-const baseTable = Object.freeze({
-  'identity': 0x00,
-  'cidv1': 0x01,
-  'cidv2': 0x02,
-  'cidv3': 0x03,
-  'ip4': 0x04,
-  'tcp': 0x06,
-  'sha1': 0x11,
-  'sha2-256': 0x12,
-  'sha2-512': 0x13,
-  'sha3-512': 0x14,
-  'sha3-384': 0x15,
-  'sha3-256': 0x16,
-  'sha3-224': 0x17,
-  'shake-128': 0x18,
-  'shake-256': 0x19,
-  'keccak-224': 0x1a,
-  'keccak-256': 0x1b,
-  'keccak-384': 0x1c,
-  'keccak-512': 0x1d,
-  'blake3': 0x1e,
-  'dccp': 0x21,
-  'murmur3-128': 0x22,
-  'murmur3-32': 0x23,
-  'ip6': 0x29,
-  'ip6zone': 0x2a,
-  'path': 0x2f,
-  'multicodec': 0x30,
-  'multihash': 0x31,
-  'multiaddr': 0x32,
-  'multibase': 0x33,
-  'dns': 0x35,
-  'dns4': 0x36,
-  'dns6': 0x37,
-  'dnsaddr': 0x38,
-  'protobuf': 0x50,
-  'cbor': 0x51,
-  'raw': 0x55,
-  'dbl-sha2-256': 0x56,
-  'rlp': 0x60,
-  'bencode': 0x63,
-  'dag-pb': 0x70,
-  'dag-cbor': 0x71,
-  'libp2p-key': 0x72,
-  'git-raw': 0x78,
-  'torrent-info': 0x7b,
-  'torrent-file': 0x7c,
-  'leofcoin-block': 0x81,
-  'leofcoin-tx': 0x82,
-  'leofcoin-pr': 0x83,
-  'sctp': 0x84,
-  'dag-jose': 0x85,
-  'dag-cose': 0x86,
-  'eth-block': 0x90,
-  'eth-block-list': 0x91,
-  'eth-tx-trie': 0x92,
-  'eth-tx': 0x93,
-  'eth-tx-receipt-trie': 0x94,
-  'eth-tx-receipt': 0x95,
-  'eth-state-trie': 0x96,
-  'eth-account-snapshot': 0x97,
-  'eth-storage-trie': 0x98,
-  'bitcoin-block': 0xb0,
-  'bitcoin-tx': 0xb1,
-  'bitcoin-witness-commitment': 0xb2,
-  'zcash-block': 0xc0,
-  'zcash-tx': 0xc1,
-  'docid': 0xce,
-  'stellar-block': 0xd0,
-  'stellar-tx': 0xd1,
-  'md4': 0xd4,
-  'md5': 0xd5,
-  'bmt': 0xd6,
-  'decred-block': 0xe0,
-  'decred-tx': 0xe1,
-  'ipld-ns': 0xe2,
-  'ipfs-ns': 0xe3,
-  'swarm-ns': 0xe4,
-  'ipns-ns': 0xe5,
-  'zeronet': 0xe6,
-  'secp256k1-pub': 0xe7,
-  'bls12_381-g1-pub': 0xea,
-  'bls12_381-g2-pub': 0xeb,
-  'x25519-pub': 0xec,
-  'ed25519-pub': 0xed,
-  'bls12_381-g1g2-pub': 0xee,
-  'dash-block': 0xf0,
-  'dash-tx': 0xf1,
-  'swarm-manifest': 0xfa,
-  'swarm-feed': 0xfb,
-  'udp': 0x0111,
-  'p2p-webrtc-star': 0x0113,
-  'p2p-webrtc-direct': 0x0114,
-  'p2p-stardust': 0x0115,
-  'p2p-circuit': 0x0122,
-  'dag-json': 0x0129,
-  'udt': 0x012d,
-  'utp': 0x012e,
-  'unix': 0x0190,
-  'p2p': 0x01a5,
-  'ipfs': 0x01a5,
-  'https': 0x01bb,
-  'onion': 0x01bc,
-  'onion3': 0x01bd,
-  'garlic64': 0x01be,
-  'garlic32': 0x01bf,
-  'tls': 0x01c0,
-  'quic': 0x01cc,
-  'ws': 0x01dd,
-  'wss': 0x01de,
-  'p2p-websocket-star': 0x01df,
-  'http': 0x01e0,
-  'json': 0x0200,
-  'messagepack': 0x0201,
-  'libp2p-peer-record': 0x0301,
-  'sha2-256-trunc254-padded': 0x1012,
-  'ripemd-128': 0x1052,
-  'ripemd-160': 0x1053,
-  'ripemd-256': 0x1054,
-  'ripemd-320': 0x1055,
-  'x11': 0x1100,
-  'p256-pub': 0x1200,
-  'p384-pub': 0x1201,
-  'p521-pub': 0x1202,
-  'ed448-pub': 0x1203,
-  'x448-pub': 0x1204,
-  'ed25519-priv': 0x1300,
-  'kangarootwelve': 0x1d01,
-  'sm3-256': 0x534d,
-  'blake2b-8': 0xb201,
-  'blake2b-16': 0xb202,
-  'blake2b-24': 0xb203,
-  'blake2b-32': 0xb204,
-  'blake2b-40': 0xb205,
-  'blake2b-48': 0xb206,
-  'blake2b-56': 0xb207,
-  'blake2b-64': 0xb208,
-  'blake2b-72': 0xb209,
-  'blake2b-80': 0xb20a,
-  'blake2b-88': 0xb20b,
-  'blake2b-96': 0xb20c,
-  'blake2b-104': 0xb20d,
-  'blake2b-112': 0xb20e,
-  'blake2b-120': 0xb20f,
-  'blake2b-128': 0xb210,
-  'blake2b-136': 0xb211,
-  'blake2b-144': 0xb212,
-  'blake2b-152': 0xb213,
-  'blake2b-160': 0xb214,
-  'blake2b-168': 0xb215,
-  'blake2b-176': 0xb216,
-  'blake2b-184': 0xb217,
-  'blake2b-192': 0xb218,
-  'blake2b-200': 0xb219,
-  'blake2b-208': 0xb21a,
-  'blake2b-216': 0xb21b,
-  'blake2b-224': 0xb21c,
-  'blake2b-232': 0xb21d,
-  'blake2b-240': 0xb21e,
-  'blake2b-248': 0xb21f,
-  'blake2b-256': 0xb220,
-  'blake2b-264': 0xb221,
-  'blake2b-272': 0xb222,
-  'blake2b-280': 0xb223,
-  'blake2b-288': 0xb224,
-  'blake2b-296': 0xb225,
-  'blake2b-304': 0xb226,
-  'blake2b-312': 0xb227,
-  'blake2b-320': 0xb228,
-  'blake2b-328': 0xb229,
-  'blake2b-336': 0xb22a,
-  'blake2b-344': 0xb22b,
-  'blake2b-352': 0xb22c,
-  'blake2b-360': 0xb22d,
-  'blake2b-368': 0xb22e,
-  'blake2b-376': 0xb22f,
-  'blake2b-384': 0xb230,
-  'blake2b-392': 0xb231,
-  'blake2b-400': 0xb232,
-  'blake2b-408': 0xb233,
-  'blake2b-416': 0xb234,
-  'blake2b-424': 0xb235,
-  'blake2b-432': 0xb236,
-  'blake2b-440': 0xb237,
-  'blake2b-448': 0xb238,
-  'blake2b-456': 0xb239,
-  'blake2b-464': 0xb23a,
-  'blake2b-472': 0xb23b,
-  'blake2b-480': 0xb23c,
-  'blake2b-488': 0xb23d,
-  'blake2b-496': 0xb23e,
-  'blake2b-504': 0xb23f,
-  'blake2b-512': 0xb240,
-  'blake2s-8': 0xb241,
-  'blake2s-16': 0xb242,
-  'blake2s-24': 0xb243,
-  'blake2s-32': 0xb244,
-  'blake2s-40': 0xb245,
-  'blake2s-48': 0xb246,
-  'blake2s-56': 0xb247,
-  'blake2s-64': 0xb248,
-  'blake2s-72': 0xb249,
-  'blake2s-80': 0xb24a,
-  'blake2s-88': 0xb24b,
-  'blake2s-96': 0xb24c,
-  'blake2s-104': 0xb24d,
-  'blake2s-112': 0xb24e,
-  'blake2s-120': 0xb24f,
-  'blake2s-128': 0xb250,
-  'blake2s-136': 0xb251,
-  'blake2s-144': 0xb252,
-  'blake2s-152': 0xb253,
-  'blake2s-160': 0xb254,
-  'blake2s-168': 0xb255,
-  'blake2s-176': 0xb256,
-  'blake2s-184': 0xb257,
-  'blake2s-192': 0xb258,
-  'blake2s-200': 0xb259,
-  'blake2s-208': 0xb25a,
-  'blake2s-216': 0xb25b,
-  'blake2s-224': 0xb25c,
-  'blake2s-232': 0xb25d,
-  'blake2s-240': 0xb25e,
-  'blake2s-248': 0xb25f,
-  'blake2s-256': 0xb260,
-  'skein256-8': 0xb301,
-  'skein256-16': 0xb302,
-  'skein256-24': 0xb303,
-  'skein256-32': 0xb304,
-  'skein256-40': 0xb305,
-  'skein256-48': 0xb306,
-  'skein256-56': 0xb307,
-  'skein256-64': 0xb308,
-  'skein256-72': 0xb309,
-  'skein256-80': 0xb30a,
-  'skein256-88': 0xb30b,
-  'skein256-96': 0xb30c,
-  'skein256-104': 0xb30d,
-  'skein256-112': 0xb30e,
-  'skein256-120': 0xb30f,
-  'skein256-128': 0xb310,
-  'skein256-136': 0xb311,
-  'skein256-144': 0xb312,
-  'skein256-152': 0xb313,
-  'skein256-160': 0xb314,
-  'skein256-168': 0xb315,
-  'skein256-176': 0xb316,
-  'skein256-184': 0xb317,
-  'skein256-192': 0xb318,
-  'skein256-200': 0xb319,
-  'skein256-208': 0xb31a,
-  'skein256-216': 0xb31b,
-  'skein256-224': 0xb31c,
-  'skein256-232': 0xb31d,
-  'skein256-240': 0xb31e,
-  'skein256-248': 0xb31f,
-  'skein256-256': 0xb320,
-  'skein512-8': 0xb321,
-  'skein512-16': 0xb322,
-  'skein512-24': 0xb323,
-  'skein512-32': 0xb324,
-  'skein512-40': 0xb325,
-  'skein512-48': 0xb326,
-  'skein512-56': 0xb327,
-  'skein512-64': 0xb328,
-  'skein512-72': 0xb329,
-  'skein512-80': 0xb32a,
-  'skein512-88': 0xb32b,
-  'skein512-96': 0xb32c,
-  'skein512-104': 0xb32d,
-  'skein512-112': 0xb32e,
-  'skein512-120': 0xb32f,
-  'skein512-128': 0xb330,
-  'skein512-136': 0xb331,
-  'skein512-144': 0xb332,
-  'skein512-152': 0xb333,
-  'skein512-160': 0xb334,
-  'skein512-168': 0xb335,
-  'skein512-176': 0xb336,
-  'skein512-184': 0xb337,
-  'skein512-192': 0xb338,
-  'skein512-200': 0xb339,
-  'skein512-208': 0xb33a,
-  'skein512-216': 0xb33b,
-  'skein512-224': 0xb33c,
-  'skein512-232': 0xb33d,
-  'skein512-240': 0xb33e,
-  'skein512-248': 0xb33f,
-  'skein512-256': 0xb340,
-  'skein512-264': 0xb341,
-  'skein512-272': 0xb342,
-  'skein512-280': 0xb343,
-  'skein512-288': 0xb344,
-  'skein512-296': 0xb345,
-  'skein512-304': 0xb346,
-  'skein512-312': 0xb347,
-  'skein512-320': 0xb348,
-  'skein512-328': 0xb349,
-  'skein512-336': 0xb34a,
-  'skein512-344': 0xb34b,
-  'skein512-352': 0xb34c,
-  'skein512-360': 0xb34d,
-  'skein512-368': 0xb34e,
-  'skein512-376': 0xb34f,
-  'skein512-384': 0xb350,
-  'skein512-392': 0xb351,
-  'skein512-400': 0xb352,
-  'skein512-408': 0xb353,
-  'skein512-416': 0xb354,
-  'skein512-424': 0xb355,
-  'skein512-432': 0xb356,
-  'skein512-440': 0xb357,
-  'skein512-448': 0xb358,
-  'skein512-456': 0xb359,
-  'skein512-464': 0xb35a,
-  'skein512-472': 0xb35b,
-  'skein512-480': 0xb35c,
-  'skein512-488': 0xb35d,
-  'skein512-496': 0xb35e,
-  'skein512-504': 0xb35f,
-  'skein512-512': 0xb360,
-  'skein1024-8': 0xb361,
-  'skein1024-16': 0xb362,
-  'skein1024-24': 0xb363,
-  'skein1024-32': 0xb364,
-  'skein1024-40': 0xb365,
-  'skein1024-48': 0xb366,
-  'skein1024-56': 0xb367,
-  'skein1024-64': 0xb368,
-  'skein1024-72': 0xb369,
-  'skein1024-80': 0xb36a,
-  'skein1024-88': 0xb36b,
-  'skein1024-96': 0xb36c,
-  'skein1024-104': 0xb36d,
-  'skein1024-112': 0xb36e,
-  'skein1024-120': 0xb36f,
-  'skein1024-128': 0xb370,
-  'skein1024-136': 0xb371,
-  'skein1024-144': 0xb372,
-  'skein1024-152': 0xb373,
-  'skein1024-160': 0xb374,
-  'skein1024-168': 0xb375,
-  'skein1024-176': 0xb376,
-  'skein1024-184': 0xb377,
-  'skein1024-192': 0xb378,
-  'skein1024-200': 0xb379,
-  'skein1024-208': 0xb37a,
-  'skein1024-216': 0xb37b,
-  'skein1024-224': 0xb37c,
-  'skein1024-232': 0xb37d,
-  'skein1024-240': 0xb37e,
-  'skein1024-248': 0xb37f,
-  'skein1024-256': 0xb380,
-  'skein1024-264': 0xb381,
-  'skein1024-272': 0xb382,
-  'skein1024-280': 0xb383,
-  'skein1024-288': 0xb384,
-  'skein1024-296': 0xb385,
-  'skein1024-304': 0xb386,
-  'skein1024-312': 0xb387,
-  'skein1024-320': 0xb388,
-  'skein1024-328': 0xb389,
-  'skein1024-336': 0xb38a,
-  'skein1024-344': 0xb38b,
-  'skein1024-352': 0xb38c,
-  'skein1024-360': 0xb38d,
-  'skein1024-368': 0xb38e,
-  'skein1024-376': 0xb38f,
-  'skein1024-384': 0xb390,
-  'skein1024-392': 0xb391,
-  'skein1024-400': 0xb392,
-  'skein1024-408': 0xb393,
-  'skein1024-416': 0xb394,
-  'skein1024-424': 0xb395,
-  'skein1024-432': 0xb396,
-  'skein1024-440': 0xb397,
-  'skein1024-448': 0xb398,
-  'skein1024-456': 0xb399,
-  'skein1024-464': 0xb39a,
-  'skein1024-472': 0xb39b,
-  'skein1024-480': 0xb39c,
-  'skein1024-488': 0xb39d,
-  'skein1024-496': 0xb39e,
-  'skein1024-504': 0xb39f,
-  'skein1024-512': 0xb3a0,
-  'skein1024-520': 0xb3a1,
-  'skein1024-528': 0xb3a2,
-  'skein1024-536': 0xb3a3,
-  'skein1024-544': 0xb3a4,
-  'skein1024-552': 0xb3a5,
-  'skein1024-560': 0xb3a6,
-  'skein1024-568': 0xb3a7,
-  'skein1024-576': 0xb3a8,
-  'skein1024-584': 0xb3a9,
-  'skein1024-592': 0xb3aa,
-  'skein1024-600': 0xb3ab,
-  'skein1024-608': 0xb3ac,
-  'skein1024-616': 0xb3ad,
-  'skein1024-624': 0xb3ae,
-  'skein1024-632': 0xb3af,
-  'skein1024-640': 0xb3b0,
-  'skein1024-648': 0xb3b1,
-  'skein1024-656': 0xb3b2,
-  'skein1024-664': 0xb3b3,
-  'skein1024-672': 0xb3b4,
-  'skein1024-680': 0xb3b5,
-  'skein1024-688': 0xb3b6,
-  'skein1024-696': 0xb3b7,
-  'skein1024-704': 0xb3b8,
-  'skein1024-712': 0xb3b9,
-  'skein1024-720': 0xb3ba,
-  'skein1024-728': 0xb3bb,
-  'skein1024-736': 0xb3bc,
-  'skein1024-744': 0xb3bd,
-  'skein1024-752': 0xb3be,
-  'skein1024-760': 0xb3bf,
-  'skein1024-768': 0xb3c0,
-  'skein1024-776': 0xb3c1,
-  'skein1024-784': 0xb3c2,
-  'skein1024-792': 0xb3c3,
-  'skein1024-800': 0xb3c4,
-  'skein1024-808': 0xb3c5,
-  'skein1024-816': 0xb3c6,
-  'skein1024-824': 0xb3c7,
-  'skein1024-832': 0xb3c8,
-  'skein1024-840': 0xb3c9,
-  'skein1024-848': 0xb3ca,
-  'skein1024-856': 0xb3cb,
-  'skein1024-864': 0xb3cc,
-  'skein1024-872': 0xb3cd,
-  'skein1024-880': 0xb3ce,
-  'skein1024-888': 0xb3cf,
-  'skein1024-896': 0xb3d0,
-  'skein1024-904': 0xb3d1,
-  'skein1024-912': 0xb3d2,
-  'skein1024-920': 0xb3d3,
-  'skein1024-928': 0xb3d4,
-  'skein1024-936': 0xb3d5,
-  'skein1024-944': 0xb3d6,
-  'skein1024-952': 0xb3d7,
-  'skein1024-960': 0xb3d8,
-  'skein1024-968': 0xb3d9,
-  'skein1024-976': 0xb3da,
-  'skein1024-984': 0xb3db,
-  'skein1024-992': 0xb3dc,
-  'skein1024-1000': 0xb3dd,
-  'skein1024-1008': 0xb3de,
-  'skein1024-1016': 0xb3df,
-  'skein1024-1024': 0xb3e0,
-  'poseidon-bls12_381-a2-fc1': 0xb401,
-  'poseidon-bls12_381-a2-fc1-sc': 0xb402,
-  'zeroxcert-imprint-256': 0xce11,
-  'fil-commitment-unsealed': 0xf101,
-  'fil-commitment-sealed': 0xf102,
-  'holochain-adr-v0': 0x807124,
-  'holochain-adr-v1': 0x817124,
-  'holochain-key-v0': 0x947124,
-  'holochain-key-v1': 0x957124,
-  'holochain-sig-v0': 0xa27124,
-  'holochain-sig-v1': 0xa37124,
-  'skynet-ns': 0xb19910
-})
-
-module.exports = { baseTable }
-
-
-/***/ }),
-
-/***/ 7713:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').ConstantNumberMap} ConstantNumberMap */
-
-const { baseTable } = __nccwpck_require__(21)
-
-const constants = /** @type {ConstantNumberMap} */({})
-
-for (const [name, code] of Object.entries(baseTable)) {
-  const constant = name.toUpperCase().replace(/-/g, '_')
-  constants[constant] = code
-}
-
-module.exports = Object.freeze(constants)
-
-
-/***/ }),
-
-/***/ 9483:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-/**
- * Implementation of the multicodec specification.
- *
- * @module multicodec
- * @example
- * const multicodec = require('multicodec')
- *
- * const prefixedProtobuf = multicodec.addPrefix('protobuf', protobufBuffer)
- * // prefixedProtobuf 0x50...
- *
- */
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').CodecNumber} CodecNumber */
-
-const varint = __nccwpck_require__(3674)
-const intTable = __nccwpck_require__(1871)
-const codecNameToCodeVarint = __nccwpck_require__(3201)
-const util = __nccwpck_require__(1995)
-const uint8ArrayConcat = __nccwpck_require__(7208)
-
-/**
- * Prefix a buffer with a multicodec-packed.
- *
- * @param {CodecName|Uint8Array} multicodecStrOrCode
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
-function addPrefix (multicodecStrOrCode, data) {
-  let prefix
-
-  if (multicodecStrOrCode instanceof Uint8Array) {
-    prefix = util.varintUint8ArrayEncode(multicodecStrOrCode)
-  } else {
-    if (codecNameToCodeVarint[multicodecStrOrCode]) {
-      prefix = codecNameToCodeVarint[multicodecStrOrCode]
-    } else {
-      throw new Error('multicodec not recognized')
-    }
-  }
-  return uint8ArrayConcat([prefix, data], prefix.length + data.length)
-}
-
-/**
- * Decapsulate the multicodec-packed prefix from the data.
- *
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
-function rmPrefix (data) {
-  varint.decode(data)
-  return data.slice(varint.decode.bytes)
-}
-
-/**
- * Get the codec of the prefixed data.
- *
- * @param {Uint8Array} prefixedData
- * @returns {CodecName}
- */
-function getCodec (prefixedData) {
-  const code = varint.decode(prefixedData)
-  const codecName = intTable.get(code)
-  if (codecName === undefined) {
-    throw new Error(`Code ${code} not found`)
-  }
-  return codecName
-}
-
-/**
- * Get the name of the codec.
- *
- * @param {CodecNumber} codec
- * @returns {CodecName|undefined}
- */
-function getName (codec) {
-  return intTable.get(codec)
-}
-
-/**
- * Get the code of the codec
- *
- * @param {CodecName} name
- * @returns {CodecNumber}
- */
-function getNumber (name) {
-  const code = codecNameToCodeVarint[name]
-  if (code === undefined) {
-    throw new Error('Codec `' + name + '` not found')
-  }
-  return varint.decode(code)
-}
-
-/**
- * Get the code of the prefixed data.
- *
- * @param {Uint8Array} prefixedData
- * @returns {CodecNumber}
- */
-function getCode (prefixedData) {
-  return varint.decode(prefixedData)
-}
-
-/**
- * Get the code as varint of a codec name.
- *
- * @param {CodecName} codecName
- * @returns {Uint8Array}
- */
-function getCodeVarint (codecName) {
-  const code = codecNameToCodeVarint[codecName]
-  if (code === undefined) {
-    throw new Error('Codec `' + codecName + '` not found')
-  }
-  return code
-}
-
-/**
- * Get the varint of a code.
- *
- * @param {CodecNumber} code
- * @returns {Array.<number>}
- */
-function getVarint (code) {
-  return varint.encode(code)
-}
-
-// Make the constants top-level constants
-const constants = __nccwpck_require__(7713)
-
-// Human friendly names for printing, e.g. in error messages
-const print = __nccwpck_require__(3214)
-
-module.exports = {
-  addPrefix,
-  rmPrefix,
-  getCodec,
-  getName,
-  getNumber,
-  getCode,
-  getCodeVarint,
-  getVarint,
-  print,
-  ...constants
-}
-
-
-/***/ }),
-
-/***/ 1871:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').CodecNumber} CodecNumber */
-
-const { baseTable } = __nccwpck_require__(21)
-
-/**
- * @type {Map<CodecNumber,CodecName>}
- */
-const nameTable = new Map()
-
-for (const encodingName in baseTable) {
-  const code = baseTable[encodingName]
-  nameTable.set(code, /** @type {CodecName} */(encodingName))
-}
-
-module.exports = Object.freeze(nameTable)
-
-
-/***/ }),
-
-/***/ 3214:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').NumberNameMap} NumberNameMap */
-
-const { baseTable } = __nccwpck_require__(21)
-
-const tableByCode = /** @type {NumberNameMap} */({})
-
-for (const [name, code] of Object.entries(baseTable)) {
-  if (tableByCode[code] === undefined) {
-    tableByCode[code] = /** @type {CodecName} **/(name)
-  }
-}
-
-module.exports = /** @type {NumberNameMap} */(Object.freeze(tableByCode))
-
-
-/***/ }),
-
-/***/ 1995:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(3674)
-const uint8ArrayToString = __nccwpck_require__(2129)
-const uint8ArrayFromString = __nccwpck_require__(6485)
-
-module.exports = {
-  numberToUint8Array,
-  uint8ArrayToNumber,
-  varintUint8ArrayEncode,
-  varintEncode
-}
-
-function uint8ArrayToNumber (buf) {
-  return parseInt(uint8ArrayToString(buf, 'base16'), 16)
-}
-
-function numberToUint8Array (num) {
-  let hexString = num.toString(16)
-  if (hexString.length % 2 === 1) {
-    hexString = '0' + hexString
-  }
-  return uint8ArrayFromString(hexString, 'base16')
-}
-
-function varintUint8ArrayEncode (input) {
-  return Uint8Array.from(varint.encode(uint8ArrayToNumber(input)))
-}
-
-function varintEncode (num) {
-  return Uint8Array.from(varint.encode(num))
-}
-
-
-/***/ }),
-
-/***/ 3201:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').NameUint8ArrayMap} NameUint8ArrayMap */
-
-const { baseTable } = __nccwpck_require__(21)
-const varintEncode = __nccwpck_require__(1995).varintEncode
-
-const varintTable = /** @type {NameUint8ArrayMap} */ ({})
-
-for (const encodingName in baseTable) {
-  const code = baseTable[encodingName]
-  varintTable[encodingName] = varintEncode(code)
-}
-
-module.exports = Object.freeze(varintTable)
-
-
-/***/ }),
-
-/***/ 1465:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Can be used with Array.sort to sort and array with Uint8Array entries
- *
- * @param {Uint8Array} a
- * @param {Uint8Array} b
- * @returns {Number}
- */
-function compare (a, b) {
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] < b[i]) {
-      return -1
-    }
-
-    if (a[i] > b[i]) {
-      return 1
-    }
-  }
-
-  if (a.byteLength > b.byteLength) {
-    return 1
-  }
-
-  if (a.byteLength < b.byteLength) {
-    return -1
-  }
-
-  return 0
-}
-
-module.exports = compare
-
-
-/***/ }),
-
-/***/ 7208:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Returns a new Uint8Array created by concatenating the passed ArrayLikes
- *
- * @param {Array<ArrayLike<number>>} arrays
- * @param {Number} length
- * @returns {Uint8Array}
- */
-function concat (arrays, length) {
-  if (!length) {
-    length = arrays.reduce((acc, curr) => acc + curr.length, 0)
-  }
-
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrays) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = concat
-
-
-/***/ }),
-
-/***/ 9958:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Returns true if the two passed Uint8Arrays have the same content
- *
- * @param {Uint8Array} a
- * @param {Uint8Array} b
- * @returns {boolean}
- */
-function equals (a, b) {
-  if (a === b) {
-    return true
-  }
-
-  if (a.byteLength !== b.byteLength) {
-    return false
-  }
-
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) {
-      return false
-    }
-  }
-
-  return true
-}
-
-module.exports = equals
-
-
-/***/ }),
-
-/***/ 6485:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(80)
-const { TextEncoder } = __nccwpck_require__(2287)
-const utf8Encoder = new TextEncoder()
-
-/**
- * Interperets each character in a string as a byte and
- * returns a Uint8Array of those bytes.
- *
- * @param {String} string The string to turn into an array
- * @returns {Uint8Array}
- */
-function asciiStringToUint8Array (string) {
-  const array = new Uint8Array(string.length)
-
-  for (let i = 0; i < string.length; i++) {
-    array[i] = string.charCodeAt(i)
-  }
-
-  return array
-}
-
-/**
- * Create a `Uint8Array` from the passed string
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {String} string
- * @param {String} [encoding=utf8] utf8, base16, base64, base64urlpad, etc
- * @returns {Uint8Array}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function fromString (string, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Encoder.encode(string)
-  }
-
-  if (encoding === 'ascii') {
-    return asciiStringToUint8Array(string)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.decode(string)
-}
-
-module.exports = fromString
-
-
-/***/ }),
-
-/***/ 2129:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(80)
-const { TextDecoder } = __nccwpck_require__(2287)
-const utf8Decoder = new TextDecoder('utf8')
-
-/**
- * Turns a Uint8Array of bytes into a string with each
- * character being the char code of the corresponding byte
- *
- * @param {Uint8Array} array The array to turn into a string
- * @returns {String}
- */
-function uint8ArrayToAsciiString (array) {
-  let string = ''
-
-  for (let i = 0; i < array.length; i++) {
-    string += String.fromCharCode(array[i])
-  }
-  return string
-}
-
-/**
- * Turns a `Uint8Array` into a string.
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {Uint8Array} array The array to turn into a string
- * @param {String} [encoding=utf8] The encoding to use
- * @returns {String}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function toString (array, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Decoder.decode(array)
-  }
-
-  if (encoding === 'ascii') {
-    return uint8ArrayToAsciiString(array)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.encode(array)
-}
-
-module.exports = toString
-
-
-/***/ }),
-
-/***/ 5560:
-/***/ ((module) => {
-
-module.exports = read
-
-var MSB = 0x80
-  , REST = 0x7F
-
-function read(buf, offset) {
-  var res    = 0
-    , offset = offset || 0
-    , shift  = 0
-    , counter = offset
-    , b
-    , l = buf.length
-
-  do {
-    if (counter >= l || shift > 49) {
-      read.bytes = 0
-      throw new RangeError('Could not decode varint')
-    }
-    b = buf[counter++]
-    res += shift < 28
-      ? (b & REST) << shift
-      : (b & REST) * Math.pow(2, shift)
-    shift += 7
-  } while (b >= MSB)
-
-  read.bytes = counter - offset
-
-  return res
-}
-
-
-/***/ }),
-
-/***/ 8146:
-/***/ ((module) => {
-
-module.exports = encode
-
-var MSB = 0x80
-  , REST = 0x7F
-  , MSBALL = ~REST
-  , INT = Math.pow(2, 31)
-
-function encode(num, out, offset) {
-  if (Number.MAX_SAFE_INTEGER && num > Number.MAX_SAFE_INTEGER) {
-    encode.bytes = 0
-    throw new RangeError('Could not encode varint')
-  }
-  out = out || []
-  offset = offset || 0
-  var oldOffset = offset
-
-  while(num >= INT) {
-    out[offset++] = (num & 0xFF) | MSB
-    num /= 128
-  }
-  while(num & MSBALL) {
-    out[offset++] = (num & 0xFF) | MSB
-    num >>>= 7
-  }
-  out[offset] = num | 0
-  
-  encode.bytes = offset - oldOffset + 1
-  
-  return out
-}
-
-
-/***/ }),
-
-/***/ 3674:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-module.exports = {
-    encode: __nccwpck_require__(8146)
-  , decode: __nccwpck_require__(5560)
-  , encodingLength: __nccwpck_require__(6440)
-}
-
-
-/***/ }),
-
-/***/ 6440:
-/***/ ((module) => {
-
-
-var N1 = Math.pow(2,  7)
-var N2 = Math.pow(2, 14)
-var N3 = Math.pow(2, 21)
-var N4 = Math.pow(2, 28)
-var N5 = Math.pow(2, 35)
-var N6 = Math.pow(2, 42)
-var N7 = Math.pow(2, 49)
-var N8 = Math.pow(2, 56)
-var N9 = Math.pow(2, 63)
-
-module.exports = function (value) {
-  return (
-    value < N1 ? 1
-  : value < N2 ? 2
-  : value < N3 ? 3
-  : value < N4 ? 4
-  : value < N5 ? 5
-  : value < N6 ? 6
-  : value < N7 ? 7
-  : value < N8 ? 8
-  : value < N9 ? 9
-  :              10
-  )
-}
-
-
-/***/ }),
-
 /***/ 5144:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 const CID = __nccwpck_require__(9016)
-const withIs = __nccwpck_require__(4642)
-const uint8ArrayFromString = __nccwpck_require__(6485)
+const uint8ArrayFromString = __nccwpck_require__(828)
 
-// Link represents an IPFS Merkle DAG Link between Nodes.
+/**
+ * Link represents an IPFS Merkle DAG Link between Nodes.
+ */
 class DAGLink {
+  /**
+   * @param {string | undefined | null} name
+   * @param {number} size
+   * @param {CID | string | Uint8Array} cid
+   */
   constructor (name, size, cid) {
     if (!cid) {
       throw new Error('A link requires a cid to point to')
@@ -27393,11 +26045,11 @@ class DAGLink {
     // assert(size, 'A link requires a size')
     //  note - links should include size, but this assert is disabled
     //  for now to maintain consistency with go-ipfs pinset
+    this.Name = name || ''
+    this.Tsize = size
+    this.Hash = new CID(cid)
 
     Object.defineProperties(this, {
-      Name: { value: name || '', writable: false, enumerable: true },
-      Tsize: { value: size, writable: false, enumerable: true },
-      Hash: { value: new CID(cid), writable: false, enumerable: true },
       _nameBuf: { value: null, writable: true, enumerable: false }
     })
   }
@@ -27422,7 +26074,7 @@ class DAGLink {
   // We need this to sort the links, otherwise
   // we will reallocate new Uint8Arrays every time
   get nameAsBuffer () {
-    if (this._nameBuf !== null) {
+    if (this._nameBuf != null) {
       return this._nameBuf
     }
 
@@ -27431,31 +26083,22 @@ class DAGLink {
   }
 }
 
-exports = module.exports = withIs(DAGLink, { className: 'DAGLink', symbolName: '@ipld/js-ipld-dag-pb/daglink' })
-
-
-/***/ }),
-
-/***/ 8343:
-/***/ ((module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-exports = module.exports = __nccwpck_require__(5144)
-exports.util = __nccwpck_require__(4215)
+module.exports = DAGLink
 
 
 /***/ }),
 
 /***/ 4215:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 const DAGLink = __nccwpck_require__(5144)
 
+/**
+ * @param {*} link
+ */
 function createDagLinkFromB58EncodedHash (link) {
   return new DAGLink(
     link.Name || link.name || '',
@@ -27464,8 +26107,9 @@ function createDagLinkFromB58EncodedHash (link) {
   )
 }
 
-exports = module.exports
-exports.createDagLinkFromB58EncodedHash = createDagLinkFromB58EncodedHash
+module.exports = {
+  createDagLinkFromB58EncodedHash
+}
 
 
 /***/ }),
@@ -27477,10 +26121,19 @@ exports.createDagLinkFromB58EncodedHash = createDagLinkFromB58EncodedHash
 
 
 const sortLinks = __nccwpck_require__(3422)
-const DAGLink = __nccwpck_require__(8343)
+const DAGLink = __nccwpck_require__(5144)
 
+/**
+ * @typedef {import('./dagNode')} DAGNode
+ * @typedef {import('../types')} DAGLinkLike
+ */
+
+/**
+ * @param {*} link
+ * @returns {DAGLink}
+ */
 const asDAGLink = (link) => {
-  if (DAGLink.isDAGLink(link)) {
+  if (link instanceof DAGLink) {
     // It's a DAGLink instance
     // no need to do anything
     return link
@@ -27497,9 +26150,14 @@ const asDAGLink = (link) => {
   }
 
   // It's a Object with name, multihash/hash/cid and size
+  // @ts-ignore
   return new DAGLink(link.Name || link.name, link.Tsize || link.size, link.Hash || link.multihash || link.hash || link.cid)
 }
 
+/**
+ * @param {DAGNode} node
+ * @param {DAGLink | DAGLinkLike} link
+ */
 const addLink = (node, link) => {
   const dagLink = asDAGLink(link)
   node.Links.push(dagLink)
@@ -27512,22 +26170,32 @@ module.exports = addLink
 /***/ }),
 
 /***/ 1204:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-const withIs = __nccwpck_require__(4642)
 const sortLinks = __nccwpck_require__(3422)
 const DAGLink = __nccwpck_require__(5144)
+const { createDagLinkFromB58EncodedHash } = __nccwpck_require__(4215)
 const { serializeDAGNode } = __nccwpck_require__(6014)
 const toDAGLink = __nccwpck_require__(9925)
 const addLink = __nccwpck_require__(671)
 const rmLink = __nccwpck_require__(4863)
-const uint8ArrayFromString = __nccwpck_require__(6485)
-const uint8ArrayToString = __nccwpck_require__(2129)
+const uint8ArrayFromString = __nccwpck_require__(828)
+const uint8ArrayToString = __nccwpck_require__(757)
+
+/**
+ * @typedef {import('cids')} CID
+ * @typedef {import('../types').DAGLinkLike} DAGLinkLike
+ */
 
 class DAGNode {
+  /**
+   *@param {Uint8Array | string} [data]
+   * @param {(DAGLink | DAGLinkLike)[]} links
+   * @param {number | null} [serializedSize]
+   */
   constructor (data, links = [], serializedSize = null) {
     if (!data) {
       data = new Uint8Array(0)
@@ -27544,16 +26212,17 @@ class DAGNode {
       throw new Error('Passed \'serializedSize\' must be a number!')
     }
 
-    links = links.map((link) => {
-      return DAGLink.isDAGLink(link)
+    const sortedLinks = links.map((link) => {
+      return link instanceof DAGLink
         ? link
-        : DAGLink.util.createDagLinkFromB58EncodedHash(link)
+        : createDagLinkFromB58EncodedHash(link)
     })
-    sortLinks(links)
+    sortLinks(sortedLinks)
+
+    this.Data = data
+    this.Links = sortedLinks
 
     Object.defineProperties(this, {
-      Data: { value: data, writable: false, enumerable: true },
-      Links: { value: links, writable: false, enumerable: true },
       _serializedSize: { value: serializedSize, writable: true, enumerable: false },
       _size: { value: null, writable: true, enumerable: false }
     })
@@ -27580,31 +26249,47 @@ class DAGNode {
     this._size = null
   }
 
+  /**
+   * @param {DAGLink | import('../types').DAGLinkLike} link
+   */
   addLink (link) {
     this._invalidateCached()
     return addLink(this, link)
   }
 
+  /**
+   * @param {DAGLink | string | CID} link
+   */
   rmLink (link) {
     this._invalidateCached()
     return rmLink(this, link)
   }
 
-  // @returns {Promise.<DAGLink>}
+  /**
+   * @param {import('./toDagLink').ToDagLinkOptions} [options]
+   */
   toDAGLink (options) {
     return toDAGLink(this, options)
   }
 
   serialize () {
-    return serializeDAGNode(this)
+    const buf = serializeDAGNode(this)
+
+    this._serializedSize = buf.length
+
+    return buf
   }
 
   get size () {
-    if (this._size === null) {
-      if (this._serializedSize === null) {
+    if (this._size == null) {
+      let serializedSize
+
+      if (serializedSize == null) {
         this._serializedSize = this.serialize().length
+        serializedSize = this._serializedSize
       }
-      this._size = this.Links.reduce((sum, l) => sum + l.Tsize, this._serializedSize)
+
+      this._size = this.Links.reduce((sum, l) => sum + l.Tsize, serializedSize)
     }
 
     return this._size
@@ -27615,18 +26300,7 @@ class DAGNode {
   }
 }
 
-exports = module.exports = withIs(DAGNode, { className: 'DAGNode', symbolName: '@ipld/js-ipld-dag-pb/dagnode' })
-
-
-/***/ }),
-
-/***/ 5909:
-/***/ ((module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-exports = module.exports = __nccwpck_require__(1204)
+module.exports = DAGNode
 
 
 /***/ }),
@@ -27638,16 +26312,27 @@ exports = module.exports = __nccwpck_require__(1204)
 
 
 const CID = __nccwpck_require__(9016)
-const uint8ArrayEquals = __nccwpck_require__(9958)
+const uint8ArrayEquals = __nccwpck_require__(333)
 
+/**
+ * @typedef {import('../dag-link/dagLink')} DAGLink
+ */
+
+/**
+ *
+ * @param {import('./dagNode')} dagNode
+ * @param {string | CID | Uint8Array | DAGLink} nameOrCid
+ */
 const rmLink = (dagNode, nameOrCid) => {
   let predicate = null
 
   // It's a name
   if (typeof nameOrCid === 'string') {
-    predicate = (link) => link.Name === nameOrCid
-  } else if (nameOrCid instanceof Uint8Array || CID.isCID(nameOrCid)) {
-    predicate = (link) => uint8ArrayEquals(link.Hash, nameOrCid)
+    predicate = (/** @type {DAGLink} */ link) => link.Name === nameOrCid
+  } else if (nameOrCid instanceof Uint8Array) {
+    predicate = (/** @type {DAGLink} */ link) => uint8ArrayEquals(link.Hash.bytes, nameOrCid)
+  } else if (CID.isCID(nameOrCid)) {
+    predicate = (/** @type {DAGLink} */ link) => uint8ArrayEquals(link.Hash.bytes, nameOrCid.bytes)
   }
 
   if (predicate) {
@@ -27678,8 +26363,17 @@ module.exports = rmLink
 
 
 const sort = __nccwpck_require__(5146)
-const uint8ArrayCompare = __nccwpck_require__(1465)
+const uint8ArrayCompare = __nccwpck_require__(6399)
 
+/**
+ * @typedef {import('../dag-link/dagLink')} DAGLink
+ */
+
+/**
+ *
+ * @param {DAGLink} a
+ * @param {DAGLink} b
+ */
 const linkSort = (a, b) => {
   const buf1 = a.nameAsBuffer
   const buf2 = b.nameAsBuffer
@@ -27689,7 +26383,8 @@ const linkSort = (a, b) => {
 
 /**
  * Sorts links in place (mutating given array)
- * @param {Array} links
+ *
+ * @param {DAGLink[]} links
  * @returns {void}
  */
 const sortLinks = (links) => {
@@ -27710,11 +26405,22 @@ module.exports = sortLinks
 const DAGLink = __nccwpck_require__(5144)
 const genCid = __nccwpck_require__(930)
 
-/*
+/**
  * toDAGLink converts a DAGNode to a DAGLink
+ *
+ * @typedef {import('../genCid').GenCIDOptions} GenCIDOptions
+ *
+ * @typedef {object} ToDagLinkExtraOptions
+ * @property {string} [name]
+ *
+ * @typedef {GenCIDOptions & ToDagLinkExtraOptions} ToDagLinkOptions
+ *
+ * @param {import('./dagNode')} node
+ * @param {ToDagLinkOptions} options
  */
 const toDAGLink = async (node, options = {}) => {
-  const nodeCid = await genCid.cid(node.serialize(), options)
+  const buf = node.serialize()
+  const nodeCid = await genCid.cid(buf, options)
   return new DAGLink(options.name || '', node.size, nodeCid)
 }
 
@@ -27723,95 +26429,487 @@ module.exports = toDAGLink
 
 /***/ }),
 
-/***/ 3284:
-/***/ ((module) => {
+/***/ 6835:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
+/*eslint-disable*/
 
 
-module.exports = `// An IPFS MerkleDAG Link
-message PBLink {
+var $protobuf = __nccwpck_require__(6916);
 
-  // multihash of the target object
-  optional bytes Hash = 1;
+// Common aliases
+var $Reader = $protobuf.Reader, $Writer = $protobuf.Writer, $util = $protobuf.util;
 
-  // utf string name. should be unique per object
-  optional string Name = 2;
+// Exported root namespace
+var $root = $protobuf.roots["default"] || ($protobuf.roots["default"] = {});
 
-  // cumulative size of target object
-  optional uint64 Tsize = 3;
-}
+$root.PBLink = (function() {
 
-// An IPFS MerkleDAG Node
-message PBNode {
+    /**
+     * Properties of a PBLink.
+     * @exports IPBLink
+     * @interface IPBLink
+     * @property {Uint8Array|null} [Hash] PBLink Hash
+     * @property {string|null} [Name] PBLink Name
+     * @property {number|null} [Tsize] PBLink Tsize
+     */
 
-  // refs to other objects
-  repeated PBLink Links = 2;
+    /**
+     * Constructs a new PBLink.
+     * @exports PBLink
+     * @classdesc Represents a PBLink.
+     * @implements IPBLink
+     * @constructor
+     * @param {IPBLink=} [p] Properties to set
+     */
+    function PBLink(p) {
+        if (p)
+            for (var ks = Object.keys(p), i = 0; i < ks.length; ++i)
+                if (p[ks[i]] != null)
+                    this[ks[i]] = p[ks[i]];
+    }
 
-  // opaque user data
-  optional bytes Data = 1;
-}`
+    /**
+     * PBLink Hash.
+     * @member {Uint8Array} Hash
+     * @memberof PBLink
+     * @instance
+     */
+    PBLink.prototype.Hash = $util.newBuffer([]);
+
+    /**
+     * PBLink Name.
+     * @member {string} Name
+     * @memberof PBLink
+     * @instance
+     */
+    PBLink.prototype.Name = "";
+
+    /**
+     * PBLink Tsize.
+     * @member {number} Tsize
+     * @memberof PBLink
+     * @instance
+     */
+    PBLink.prototype.Tsize = $util.Long ? $util.Long.fromBits(0,0,true) : 0;
+
+    /**
+     * Encodes the specified PBLink message. Does not implicitly {@link PBLink.verify|verify} messages.
+     * @function encode
+     * @memberof PBLink
+     * @static
+     * @param {IPBLink} m PBLink message or plain object to encode
+     * @param {$protobuf.Writer} [w] Writer to encode to
+     * @returns {$protobuf.Writer} Writer
+     */
+    PBLink.encode = function encode(m, w) {
+        if (!w)
+            w = $Writer.create();
+        if (m.Hash != null && Object.hasOwnProperty.call(m, "Hash"))
+            w.uint32(10).bytes(m.Hash);
+        if (m.Name != null && Object.hasOwnProperty.call(m, "Name"))
+            w.uint32(18).string(m.Name);
+        if (m.Tsize != null && Object.hasOwnProperty.call(m, "Tsize"))
+            w.uint32(24).uint64(m.Tsize);
+        return w;
+    };
+
+    /**
+     * Decodes a PBLink message from the specified reader or buffer.
+     * @function decode
+     * @memberof PBLink
+     * @static
+     * @param {$protobuf.Reader|Uint8Array} r Reader or buffer to decode from
+     * @param {number} [l] Message length if known beforehand
+     * @returns {PBLink} PBLink
+     * @throws {Error} If the payload is not a reader or valid buffer
+     * @throws {$protobuf.util.ProtocolError} If required fields are missing
+     */
+    PBLink.decode = function decode(r, l) {
+        if (!(r instanceof $Reader))
+            r = $Reader.create(r);
+        var c = l === undefined ? r.len : r.pos + l, m = new $root.PBLink();
+        while (r.pos < c) {
+            var t = r.uint32();
+            switch (t >>> 3) {
+            case 1:
+                m.Hash = r.bytes();
+                break;
+            case 2:
+                m.Name = r.string();
+                break;
+            case 3:
+                m.Tsize = r.uint64();
+                break;
+            default:
+                r.skipType(t & 7);
+                break;
+            }
+        }
+        return m;
+    };
+
+    /**
+     * Creates a PBLink message from a plain object. Also converts values to their respective internal types.
+     * @function fromObject
+     * @memberof PBLink
+     * @static
+     * @param {Object.<string,*>} d Plain object
+     * @returns {PBLink} PBLink
+     */
+    PBLink.fromObject = function fromObject(d) {
+        if (d instanceof $root.PBLink)
+            return d;
+        var m = new $root.PBLink();
+        if (d.Hash != null) {
+            if (typeof d.Hash === "string")
+                $util.base64.decode(d.Hash, m.Hash = $util.newBuffer($util.base64.length(d.Hash)), 0);
+            else if (d.Hash.length)
+                m.Hash = d.Hash;
+        }
+        if (d.Name != null) {
+            m.Name = String(d.Name);
+        }
+        if (d.Tsize != null) {
+            if ($util.Long)
+                (m.Tsize = $util.Long.fromValue(d.Tsize)).unsigned = true;
+            else if (typeof d.Tsize === "string")
+                m.Tsize = parseInt(d.Tsize, 10);
+            else if (typeof d.Tsize === "number")
+                m.Tsize = d.Tsize;
+            else if (typeof d.Tsize === "object")
+                m.Tsize = new $util.LongBits(d.Tsize.low >>> 0, d.Tsize.high >>> 0).toNumber(true);
+        }
+        return m;
+    };
+
+    /**
+     * Creates a plain object from a PBLink message. Also converts values to other types if specified.
+     * @function toObject
+     * @memberof PBLink
+     * @static
+     * @param {PBLink} m PBLink
+     * @param {$protobuf.IConversionOptions} [o] Conversion options
+     * @returns {Object.<string,*>} Plain object
+     */
+    PBLink.toObject = function toObject(m, o) {
+        if (!o)
+            o = {};
+        var d = {};
+        if (o.defaults) {
+            if (o.bytes === String)
+                d.Hash = "";
+            else {
+                d.Hash = [];
+                if (o.bytes !== Array)
+                    d.Hash = $util.newBuffer(d.Hash);
+            }
+            d.Name = "";
+            if ($util.Long) {
+                var n = new $util.Long(0, 0, true);
+                d.Tsize = o.longs === String ? n.toString() : o.longs === Number ? n.toNumber() : n;
+            } else
+                d.Tsize = o.longs === String ? "0" : 0;
+        }
+        if (m.Hash != null && m.hasOwnProperty("Hash")) {
+            d.Hash = o.bytes === String ? $util.base64.encode(m.Hash, 0, m.Hash.length) : o.bytes === Array ? Array.prototype.slice.call(m.Hash) : m.Hash;
+        }
+        if (m.Name != null && m.hasOwnProperty("Name")) {
+            d.Name = m.Name;
+        }
+        if (m.Tsize != null && m.hasOwnProperty("Tsize")) {
+            if (typeof m.Tsize === "number")
+                d.Tsize = o.longs === String ? String(m.Tsize) : m.Tsize;
+            else
+                d.Tsize = o.longs === String ? $util.Long.prototype.toString.call(m.Tsize) : o.longs === Number ? new $util.LongBits(m.Tsize.low >>> 0, m.Tsize.high >>> 0).toNumber(true) : m.Tsize;
+        }
+        return d;
+    };
+
+    /**
+     * Converts this PBLink to JSON.
+     * @function toJSON
+     * @memberof PBLink
+     * @instance
+     * @returns {Object.<string,*>} JSON object
+     */
+    PBLink.prototype.toJSON = function toJSON() {
+        return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+    };
+
+    return PBLink;
+})();
+
+$root.PBNode = (function() {
+
+    /**
+     * Properties of a PBNode.
+     * @exports IPBNode
+     * @interface IPBNode
+     * @property {Array.<IPBLink>|null} [Links] PBNode Links
+     * @property {Uint8Array|null} [Data] PBNode Data
+     */
+
+    /**
+     * Constructs a new PBNode.
+     * @exports PBNode
+     * @classdesc Represents a PBNode.
+     * @implements IPBNode
+     * @constructor
+     * @param {IPBNode=} [p] Properties to set
+     */
+    function PBNode(p) {
+        this.Links = [];
+        if (p)
+            for (var ks = Object.keys(p), i = 0; i < ks.length; ++i)
+                if (p[ks[i]] != null)
+                    this[ks[i]] = p[ks[i]];
+    }
+
+    /**
+     * PBNode Links.
+     * @member {Array.<IPBLink>} Links
+     * @memberof PBNode
+     * @instance
+     */
+    PBNode.prototype.Links = $util.emptyArray;
+
+    /**
+     * PBNode Data.
+     * @member {Uint8Array} Data
+     * @memberof PBNode
+     * @instance
+     */
+    PBNode.prototype.Data = $util.newBuffer([]);
+
+    /**
+     * Encodes the specified PBNode message. Does not implicitly {@link PBNode.verify|verify} messages.
+     * @function encode
+     * @memberof PBNode
+     * @static
+     * @param {IPBNode} m PBNode message or plain object to encode
+     * @param {$protobuf.Writer} [w] Writer to encode to
+     * @returns {$protobuf.Writer} Writer
+     */
+    PBNode.encode = function encode(m, w) {
+        if (!w)
+            w = $Writer.create();
+        if (m.Data != null && Object.hasOwnProperty.call(m, "Data"))
+            w.uint32(10).bytes(m.Data);
+        if (m.Links != null && m.Links.length) {
+            for (var i = 0; i < m.Links.length; ++i)
+                $root.PBLink.encode(m.Links[i], w.uint32(18).fork()).ldelim();
+        }
+        return w;
+    };
+
+    /**
+     * Decodes a PBNode message from the specified reader or buffer.
+     * @function decode
+     * @memberof PBNode
+     * @static
+     * @param {$protobuf.Reader|Uint8Array} r Reader or buffer to decode from
+     * @param {number} [l] Message length if known beforehand
+     * @returns {PBNode} PBNode
+     * @throws {Error} If the payload is not a reader or valid buffer
+     * @throws {$protobuf.util.ProtocolError} If required fields are missing
+     */
+    PBNode.decode = function decode(r, l) {
+        if (!(r instanceof $Reader))
+            r = $Reader.create(r);
+        var c = l === undefined ? r.len : r.pos + l, m = new $root.PBNode();
+        while (r.pos < c) {
+            var t = r.uint32();
+            switch (t >>> 3) {
+            case 2:
+                if (!(m.Links && m.Links.length))
+                    m.Links = [];
+                m.Links.push($root.PBLink.decode(r, r.uint32()));
+                break;
+            case 1:
+                m.Data = r.bytes();
+                break;
+            default:
+                r.skipType(t & 7);
+                break;
+            }
+        }
+        return m;
+    };
+
+    /**
+     * Creates a PBNode message from a plain object. Also converts values to their respective internal types.
+     * @function fromObject
+     * @memberof PBNode
+     * @static
+     * @param {Object.<string,*>} d Plain object
+     * @returns {PBNode} PBNode
+     */
+    PBNode.fromObject = function fromObject(d) {
+        if (d instanceof $root.PBNode)
+            return d;
+        var m = new $root.PBNode();
+        if (d.Links) {
+            if (!Array.isArray(d.Links))
+                throw TypeError(".PBNode.Links: array expected");
+            m.Links = [];
+            for (var i = 0; i < d.Links.length; ++i) {
+                if (typeof d.Links[i] !== "object")
+                    throw TypeError(".PBNode.Links: object expected");
+                m.Links[i] = $root.PBLink.fromObject(d.Links[i]);
+            }
+        }
+        if (d.Data != null) {
+            if (typeof d.Data === "string")
+                $util.base64.decode(d.Data, m.Data = $util.newBuffer($util.base64.length(d.Data)), 0);
+            else if (d.Data.length)
+                m.Data = d.Data;
+        }
+        return m;
+    };
+
+    /**
+     * Creates a plain object from a PBNode message. Also converts values to other types if specified.
+     * @function toObject
+     * @memberof PBNode
+     * @static
+     * @param {PBNode} m PBNode
+     * @param {$protobuf.IConversionOptions} [o] Conversion options
+     * @returns {Object.<string,*>} Plain object
+     */
+    PBNode.toObject = function toObject(m, o) {
+        if (!o)
+            o = {};
+        var d = {};
+        if (o.arrays || o.defaults) {
+            d.Links = [];
+        }
+        if (o.defaults) {
+            if (o.bytes === String)
+                d.Data = "";
+            else {
+                d.Data = [];
+                if (o.bytes !== Array)
+                    d.Data = $util.newBuffer(d.Data);
+            }
+        }
+        if (m.Data != null && m.hasOwnProperty("Data")) {
+            d.Data = o.bytes === String ? $util.base64.encode(m.Data, 0, m.Data.length) : o.bytes === Array ? Array.prototype.slice.call(m.Data) : m.Data;
+        }
+        if (m.Links && m.Links.length) {
+            d.Links = [];
+            for (var j = 0; j < m.Links.length; ++j) {
+                d.Links[j] = $root.PBLink.toObject(m.Links[j], o);
+            }
+        }
+        return d;
+    };
+
+    /**
+     * Converts this PBNode to JSON.
+     * @function toJSON
+     * @memberof PBNode
+     * @instance
+     * @returns {Object.<string,*>} JSON object
+     */
+    PBNode.prototype.toJSON = function toJSON() {
+        return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+    };
+
+    return PBNode;
+})();
+
+module.exports = $root;
 
 
 /***/ }),
 
 /***/ 930:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 const CID = __nccwpck_require__(9016)
-const multicodec = __nccwpck_require__(9483)
+const multicodec = __nccwpck_require__(7081)
 const multihashing = __nccwpck_require__(7761)
+const { multihash } = multihashing
 
-exports = module.exports
+const codec = multicodec.DAG_PB
+const defaultHashAlg = multihash.names['sha2-256']
 
-exports.codec = multicodec.DAG_PB
-exports.defaultHashAlg = multicodec.SHA2_256
+/**
+ * @typedef {object} GenCIDOptions - Options to create the CID
+ * @property {CID.CIDVersion} [cidVersion=1] - CID version number
+ * @property {multihashing.multihash.HashCode} [hashAlg=multihash.names['sha2-256']] - Defaults to the defaultHashAlg of the format
+ */
 
 /**
  * Calculate the CID of the binary blob.
  *
- * @param {Object} binaryBlob - Encoded IPLD Node
- * @param {Object} [userOptions] - Options to create the CID
- * @param {number} [userOptions.cidVersion=1] - CID version number
- * @param {string} [UserOptions.hashAlg] - Defaults to the defaultHashAlg of the format
- * @returns {Promise.<CID>}
+ * @param {Uint8Array} binaryBlob - Encoded IPLD Node
+ * @param {GenCIDOptions} [userOptions] - Options to create the CID
  */
-const cid = async (binaryBlob, userOptions) => {
-  const defaultOptions = { cidVersion: 1, hashAlg: exports.defaultHashAlg }
-  const options = Object.assign(defaultOptions, userOptions)
+const cid = async (binaryBlob, userOptions = {}) => {
+  const options = {
+    cidVersion: userOptions.cidVersion == null ? 1 : userOptions.cidVersion,
+    hashAlg: userOptions.hashAlg == null ? defaultHashAlg : userOptions.hashAlg
+  }
 
-  const multihash = await multihashing(binaryBlob, options.hashAlg)
-  const codecName = multicodec.print[exports.codec]
-  const cid = new CID(options.cidVersion, codecName, multihash)
+  const hashName = multihash.codes[options.hashAlg]
+  const hash = await multihashing(binaryBlob, hashName)
+  const codecName = multicodec.getNameFromCode(codec)
+  const cid = new CID(options.cidVersion, codecName, hash)
 
   return cid
 }
 
-exports.cid = cid
+module.exports = {
+  codec,
+  defaultHashAlg,
+  cid
+}
 
 
 /***/ }),
 
 /***/ 4184:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-exports.DAGNode = __nccwpck_require__(5909)
-exports.DAGLink = __nccwpck_require__(8343)
+const resolver = __nccwpck_require__(6951)
+const util = __nccwpck_require__(4241)
+const DAGNodeClass = __nccwpck_require__(1204)
+const DAGLinkClass = __nccwpck_require__(5144)
 
-/*
- * Functions to fulfil IPLD Format interface
- * https://github.com/ipld/interface-ipld-format
+/**
+ * @typedef {import('./types').DAGLinkLike} DAGLinkLike
+ * @typedef {import('./types').DAGNodeLike} DAGNodeLike
+ * @typedef {import('./dag-node/dagNode')} DAGNode
+ * @typedef {import('./dag-link/dagLink')} DAGLink
  */
-exports.resolver = __nccwpck_require__(6951)
-exports.util = __nccwpck_require__(4241)
-exports.codec = exports.util.codec
-exports.defaultHashAlg = exports.util.defaultHashAlg
+
+/**
+ * @type {import('./types').DAGNodeFormat}
+ */
+const format = {
+  DAGNode: DAGNodeClass,
+  DAGLink: DAGLinkClass,
+
+  /**
+   * Functions to fulfil IPLD Format interface
+   * https://github.com/ipld/interface-ipld-format
+   */
+  resolver,
+  util,
+  codec: util.codec,
+  defaultHashAlg: util.defaultHashAlg
+}
+
+module.exports = format
 
 
 /***/ }),
@@ -27829,23 +26927,22 @@ const util = __nccwpck_require__(4241)
 /**
  * Resolves a path within a PB block.
  *
- * Returns the value or a link and the partial mising path. This way the
+ * If the path resolves half-way to a link, then the `remainderPath` is the part
+ * after the link that can be used for further resolving
+ *
+ * Returns the value or a link and the partial missing path. This way the
  * IPLD Resolver can fetch the link and continue to resolve.
  *
  * @param {Uint8Array} binaryBlob - Binary representation of a PB block
  * @param {string} [path='/'] - Path that should be resolved
- * @returns {Object} result - Result of the path it it was resolved successfully
- * @returns {*} result.value - Value the path resolves to
- * @returns {string} result.remainderPath - If the path resolves half-way to a
- *   link, then the `remainderPath` is the part after the link that can be used
- *   for further resolving
  */
-exports.resolve = (binaryBlob, path) => {
+exports.resolve = (binaryBlob, path = '/') => {
   let node = util.deserialize(binaryBlob)
 
   const parts = path.split('/').filter(Boolean)
   while (parts.length) {
     const key = parts.shift()
+    // @ts-ignore
     if (node[key] === undefined) {
       // There might be a matching named link
       for (const link of node.Links) {
@@ -27861,6 +26958,7 @@ exports.resolve = (binaryBlob, path) => {
       throw new Error(`Object has no property '${key}'`)
     }
 
+    // @ts-ignore
     node = node[key]
     if (CID.isCID(node)) {
       return {
@@ -27901,17 +26999,31 @@ exports.tree = function * (binaryBlob) {
 /***/ }),
 
 /***/ 6014:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-const protons = __nccwpck_require__(9505)
-const proto = protons(__nccwpck_require__(3284))
-const DAGLink = __nccwpck_require__(5144)
+const protobuf = __nccwpck_require__(6916)
+const {
+  PBLink
+} = __nccwpck_require__(6835)
 
-exports = module.exports
+const {
+  createDagLinkFromB58EncodedHash
+} = __nccwpck_require__(4215)
 
+/**
+ * @typedef {import('./dag-link/dagLink')} DAGLink
+ * @typedef {import('./types').DAGLinkLike} DAGLinkLike
+ * @typedef {import('./types').SerializableDAGNode} SerializableDAGNode
+ * @typedef {import('cids')} CID
+ */
+
+/**
+ * @param { { Data?: Uint8Array, Links: (DAGLink | DAGLinkLike)[] }} node
+ * @returns {SerializableDAGNode}
+ */
 const toProtoBuf = (node) => {
   const pbn = {}
 
@@ -27940,78 +27052,97 @@ const toProtoBuf = (node) => {
 /**
  * Serialize internal representation into a binary PB block.
  *
- * @param {Object} node - Internal representation of a PB block
- * @returns {Uint8Array} - The encoded binary representation
+ * @param {import('./dag-node/dagNode')} node - Internal representation of a PB block
  */
 const serializeDAGNode = (node) => {
-  const data = node.Data
-  const links = node.Links || []
-
-  const serialized = proto.PBNode.encode(toProtoBuf({
-    Data: data,
-    Links: links
-  }))
-
-  return serialized
+  return encode(toProtoBuf(node))
 }
 
-// Serialize an object where the `Links` might not be a `DAGLink` instance yet
+/**
+ * Serialize an object where the `Links` might not be a `DAGLink` instance yet
+ *
+ * @param {Uint8Array} [data]
+ * @param {(DAGLink | string | DAGLinkLike)[]} [links]
+ */
 const serializeDAGNodeLike = (data, links = []) => {
-  const node = { Data: data }
-  node.Links = links.map((link) => {
-    return DAGLink.isDAGLink(link)
-      ? link
-      : DAGLink.util.createDagLinkFromB58EncodedHash(link)
-  })
-  return serializeDAGNode(node)
+  const node = {
+    Data: data,
+    Links: links.map((link) => {
+      return createDagLinkFromB58EncodedHash(link)
+    })
+  }
+
+  return encode(toProtoBuf(node))
 }
 
-exports.serializeDAGNode = serializeDAGNode
-exports.serializeDAGNodeLike = serializeDAGNodeLike
+module.exports = {
+  serializeDAGNode,
+  serializeDAGNodeLike
+}
+
+/**
+ * The fields in PBNode are the wrong way round - `id: 2` comes before
+ * `id: 1`. protobufjs writes them out in id order but go-IPFS does not so
+ * we have to use the protobuf.Writer interface directly to get the same
+ * serialized form as go-IPFS
+ *
+ * @param {SerializableDAGNode} pbf
+ */
+function encode (pbf) {
+  const writer = protobuf.Writer.create()
+
+  if (pbf.Links != null) {
+    for (let i = 0; i < pbf.Links.length; i++) {
+      PBLink.encode(pbf.Links[i], writer.uint32(18).fork()).ldelim()
+    }
+  }
+
+  if (pbf.Data != null) {
+    writer.uint32(10).bytes(pbf.Data)
+  }
+
+  return writer.finish()
+}
 
 
 /***/ }),
 
 /***/ 4241:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-const protons = __nccwpck_require__(9505)
-const proto = protons(__nccwpck_require__(3284))
+const {
+  PBNode
+} = __nccwpck_require__(6835)
 const DAGLink = __nccwpck_require__(5144)
 const DAGNode = __nccwpck_require__(1204)
-const { serializeDAGNodeLike } = __nccwpck_require__(6014)
+const { serializeDAGNode, serializeDAGNodeLike } = __nccwpck_require__(6014)
 const genCid = __nccwpck_require__(930)
 
-exports = module.exports
-
-exports.codec = genCid.codec
-exports.defaultHashAlg = genCid.defaultHashAlg
+/**
+ * @typedef {import('./types').DAGLinkLike} DAGLinkLike
+ */
 
 /**
- * Calculate the CID of the binary blob.
+ * Calculate the CID of the binary blob
  *
- * @param {Object} binaryBlob - Encoded IPLD Node
- * @param {Object} [userOptions] - Options to create the CID
- * @param {number} [userOptions.cidVersion=1] - CID version number
- * @param {string} [UserOptions.hashAlg] - Defaults to the defaultHashAlg of the format
- * @returns {Promise.<CID>}
+ * @param {Uint8Array} binaryBlob - Encoded IPLD Node
+ * @param {import('./genCid').GenCIDOptions} [userOptions] - Options to create the CID
  */
 const cid = (binaryBlob, userOptions) => {
   return genCid.cid(binaryBlob, userOptions)
 }
 
 /**
- * Serialize internal representation into a binary PB block.
+ * Serialize internal representation into a binary PB block
  *
- * @param {Object} node - Internal representation of a CBOR block
- * @returns {Uint8Array} - The encoded binary representation
+ * @param {DAGNode | { Data?: Uint8Array, Links?: (DAGLink | DAGLinkLike)[]}} node
  */
 const serialize = (node) => {
-  if (DAGNode.isDAGNode(node)) {
-    return node.serialize()
+  if (node instanceof DAGNode) {
+    return serializeDAGNode(node)
   } else {
     return serializeDAGNodeLike(node.Data, node.Links)
   }
@@ -28021,12 +27152,19 @@ const serialize = (node) => {
  * Deserialize PB block into the internal representation.
  *
  * @param {Uint8Array} buffer - Binary representation of a PB block
- * @returns {Object} - An object that conforms to the IPLD Data Model
  */
 const deserialize = (buffer) => {
-  const pbn = proto.PBNode.decode(buffer)
+  const message = PBNode.decode(buffer)
+  const pbn = PBNode.toObject(message, {
+    defaults: false,
+    arrays: true,
+    longs: Number,
+    objects: false
+  })
 
-  const links = pbn.Links.map((link) => {
+  /** @type {DAGLink[]} */
+  const links = pbn.Links.map((/** @type {DAGLinkLike} */ link) => {
+    // @ts-ignore
     return new DAGLink(link.Name, link.Tsize, link.Hash)
   })
 
@@ -28035,1362 +27173,12 @@ const deserialize = (buffer) => {
   return new DAGNode(data, links, buffer.byteLength)
 }
 
-exports.serialize = serialize
-exports.deserialize = deserialize
-exports.cid = cid
-
-
-/***/ }),
-
-/***/ 3330:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { encodeText } = __nccwpck_require__(7380)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import("./types").BaseName} BaseName */
-/** @typedef {import("./types").BaseCode} BaseCode */
-
-/**
- * Class to encode/decode in the supported Bases
- *
- */
-class Base {
-  /**
-   * @param {BaseName} name
-   * @param {BaseCode} code
-   * @param {CodecFactory} factory
-   * @param {string} alphabet
-   */
-  constructor (name, code, factory, alphabet) {
-    this.name = name
-    this.code = code
-    this.codeBuf = encodeText(this.code)
-    this.alphabet = alphabet
-    this.codec = factory(alphabet)
-  }
-
-  /**
-   * @param {Uint8Array} buf
-   * @returns {string}
-   */
-  encode (buf) {
-    return this.codec.encode(buf)
-  }
-
-  /**
-   * @param {string} string
-   * @returns {Uint8Array}
-   */
-  decode (string) {
-    for (const char of string) {
-      if (this.alphabet && this.alphabet.indexOf(char) < 0) {
-        throw new Error(`invalid character '${char}' in '${string}'`)
-      }
-    }
-    return this.codec.decode(string)
-  }
-}
-
-module.exports = Base
-
-
-/***/ }),
-
-/***/ 1989:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const baseX = __nccwpck_require__(3841)
-const Base = __nccwpck_require__(3330)
-const { rfc4648 } = __nccwpck_require__(3168)
-const { decodeText, encodeText } = __nccwpck_require__(7380)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import('./types').Codec} Codec */
-/** @typedef {import('./types').BaseName} BaseName */
-/** @typedef {import('./types').BaseCode} BaseCode */
-
-/** @type {CodecFactory} */
-const identity = () => {
-  return {
-    encode: decodeText,
-    decode: encodeText
-  }
-}
-
-/**
- *
- * name, code, implementation, alphabet
- *
- * @type {Array<[BaseName, BaseCode, CodecFactory, string]>}
- */
-const constants = [
-  ['identity', '\x00', identity, ''],
-  ['base2', '0', rfc4648(1), '01'],
-  ['base8', '7', rfc4648(3), '01234567'],
-  ['base10', '9', baseX, '0123456789'],
-  ['base16', 'f', rfc4648(4), '0123456789abcdef'],
-  ['base16upper', 'F', rfc4648(4), '0123456789ABCDEF'],
-  ['base32hex', 'v', rfc4648(5), '0123456789abcdefghijklmnopqrstuv'],
-  ['base32hexupper', 'V', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV'],
-  ['base32hexpad', 't', rfc4648(5), '0123456789abcdefghijklmnopqrstuv='],
-  ['base32hexpadupper', 'T', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV='],
-  ['base32', 'b', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567'],
-  ['base32upper', 'B', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'],
-  ['base32pad', 'c', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567='],
-  ['base32padupper', 'C', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567='],
-  ['base32z', 'h', rfc4648(5), 'ybndrfg8ejkmcpqxot1uwisza345h769'],
-  ['base36', 'k', baseX, '0123456789abcdefghijklmnopqrstuvwxyz'],
-  ['base36upper', 'K', baseX, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
-  ['base58btc', 'z', baseX, '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'],
-  ['base58flickr', 'Z', baseX, '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'],
-  ['base64', 'm', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'],
-  ['base64pad', 'M', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='],
-  ['base64url', 'u', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'],
-  ['base64urlpad', 'U', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=']
-]
-
-/** @type {Record<BaseName,Base>} */
-const names = constants.reduce((prev, tupple) => {
-  prev[tupple[0]] = new Base(tupple[0], tupple[1], tupple[2], tupple[3])
-  return prev
-}, /** @type {Record<BaseName,Base>} */({}))
-
-/** @type {Record<BaseCode,Base>} */
-const codes = constants.reduce((prev, tupple) => {
-  prev[tupple[1]] = names[tupple[0]]
-  return prev
-}, /** @type {Record<BaseCode,Base>} */({}))
-
 module.exports = {
-  names,
-  codes
-}
-
-
-/***/ }),
-
-/***/ 3168:
-/***/ ((module) => {
-
-"use strict";
-
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-
-/**
- * @param {string} string
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {Uint8Array}
- */
-const decode = (string, alphabet, bitsPerChar) => {
-  // Build the character lookup table:
-  /** @type {Record<string, number>} */
-  const codes = {}
-  for (let i = 0; i < alphabet.length; ++i) {
-    codes[alphabet[i]] = i
-  }
-
-  // Count the padding bytes:
-  let end = string.length
-  while (string[end - 1] === '=') {
-    --end
-  }
-
-  // Allocate the output:
-  const out = new Uint8Array((end * bitsPerChar / 8) | 0)
-
-  // Parse the data:
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  let written = 0 // Next byte to write
-  for (let i = 0; i < end; ++i) {
-    // Read one character from the string:
-    const value = codes[string[i]]
-    if (value === undefined) {
-      throw new SyntaxError('Invalid character ' + string[i])
-    }
-
-    // Append the bits to the buffer:
-    buffer = (buffer << bitsPerChar) | value
-    bits += bitsPerChar
-
-    // Write out some bits if the buffer has a byte's worth:
-    if (bits >= 8) {
-      bits -= 8
-      out[written++] = 0xff & (buffer >> bits)
-    }
-  }
-
-  // Verify that we have received just enough bits:
-  if (bits >= bitsPerChar || 0xff & (buffer << (8 - bits))) {
-    throw new SyntaxError('Unexpected end of data')
-  }
-
-  return out
-}
-
-/**
- * @param {Uint8Array} data
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {string}
- */
-const encode = (data, alphabet, bitsPerChar) => {
-  const pad = alphabet[alphabet.length - 1] === '='
-  const mask = (1 << bitsPerChar) - 1
-  let out = ''
-
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  for (let i = 0; i < data.length; ++i) {
-    // Slurp data into the buffer:
-    buffer = (buffer << 8) | data[i]
-    bits += 8
-
-    // Write out as much as we can:
-    while (bits > bitsPerChar) {
-      bits -= bitsPerChar
-      out += alphabet[mask & (buffer >> bits)]
-    }
-  }
-
-  // Partial character:
-  if (bits) {
-    out += alphabet[mask & (buffer << (bitsPerChar - bits))]
-  }
-
-  // Add padding characters until we hit a byte boundary:
-  if (pad) {
-    while ((out.length * bitsPerChar) & 7) {
-      out += '='
-    }
-  }
-
-  return out
-}
-
-/**
- * RFC4648 Factory
- *
- * @param {number} bitsPerChar
- * @returns {CodecFactory}
- */
-const rfc4648 = (bitsPerChar) => (alphabet) => {
-  return {
-    /**
-     * @param {Uint8Array} input
-     * @returns {string}
-     */
-    encode (input) {
-      return encode(input, alphabet, bitsPerChar)
-    },
-    /**
-     * @param {string} input
-     * @returns {Uint8Array}
-     */
-    decode (input) {
-      return decode(input, alphabet, bitsPerChar)
-    }
-  }
-}
-
-module.exports = { rfc4648 }
-
-
-/***/ }),
-
-/***/ 7380:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-// @ts-ignore
-const { TextEncoder, TextDecoder } = __nccwpck_require__(2287)
-
-const textDecoder = new TextDecoder()
-/**
- * @param {ArrayBufferView|ArrayBuffer} bytes
- * @returns {string}
- */
-const decodeText = (bytes) => textDecoder.decode(bytes)
-
-const textEncoder = new TextEncoder()
-/**
- * @param {string} text
- * @returns {Uint8Array}
- */
-const encodeText = (text) => textEncoder.encode(text)
-
-/**
- * Returns a new Uint8Array created by concatenating the passed Arrays
- *
- * @param {Array<ArrayLike<number>>} arrs
- * @param {number} length
- * @returns {Uint8Array}
- */
-function concat (arrs, length) {
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrs) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = { decodeText, encodeText, concat }
-
-
-/***/ }),
-
-/***/ 6686:
-/***/ ((module) => {
-
-"use strict";
-// DO NOT CHANGE THIS FILE. IT IS GENERATED BY tools/update-table.js
-/* eslint quote-props: off */
-
-
-/**
- * @type {import('./generated-types').NameNumberMap}
- */
-const baseTable = Object.freeze({
-  'identity': 0x00,
-  'cidv1': 0x01,
-  'cidv2': 0x02,
-  'cidv3': 0x03,
-  'ip4': 0x04,
-  'tcp': 0x06,
-  'sha1': 0x11,
-  'sha2-256': 0x12,
-  'sha2-512': 0x13,
-  'sha3-512': 0x14,
-  'sha3-384': 0x15,
-  'sha3-256': 0x16,
-  'sha3-224': 0x17,
-  'shake-128': 0x18,
-  'shake-256': 0x19,
-  'keccak-224': 0x1a,
-  'keccak-256': 0x1b,
-  'keccak-384': 0x1c,
-  'keccak-512': 0x1d,
-  'blake3': 0x1e,
-  'dccp': 0x21,
-  'murmur3-128': 0x22,
-  'murmur3-32': 0x23,
-  'ip6': 0x29,
-  'ip6zone': 0x2a,
-  'path': 0x2f,
-  'multicodec': 0x30,
-  'multihash': 0x31,
-  'multiaddr': 0x32,
-  'multibase': 0x33,
-  'dns': 0x35,
-  'dns4': 0x36,
-  'dns6': 0x37,
-  'dnsaddr': 0x38,
-  'protobuf': 0x50,
-  'cbor': 0x51,
-  'raw': 0x55,
-  'dbl-sha2-256': 0x56,
-  'rlp': 0x60,
-  'bencode': 0x63,
-  'dag-pb': 0x70,
-  'dag-cbor': 0x71,
-  'libp2p-key': 0x72,
-  'git-raw': 0x78,
-  'torrent-info': 0x7b,
-  'torrent-file': 0x7c,
-  'leofcoin-block': 0x81,
-  'leofcoin-tx': 0x82,
-  'leofcoin-pr': 0x83,
-  'sctp': 0x84,
-  'dag-jose': 0x85,
-  'dag-cose': 0x86,
-  'eth-block': 0x90,
-  'eth-block-list': 0x91,
-  'eth-tx-trie': 0x92,
-  'eth-tx': 0x93,
-  'eth-tx-receipt-trie': 0x94,
-  'eth-tx-receipt': 0x95,
-  'eth-state-trie': 0x96,
-  'eth-account-snapshot': 0x97,
-  'eth-storage-trie': 0x98,
-  'bitcoin-block': 0xb0,
-  'bitcoin-tx': 0xb1,
-  'bitcoin-witness-commitment': 0xb2,
-  'zcash-block': 0xc0,
-  'zcash-tx': 0xc1,
-  'docid': 0xce,
-  'stellar-block': 0xd0,
-  'stellar-tx': 0xd1,
-  'md4': 0xd4,
-  'md5': 0xd5,
-  'bmt': 0xd6,
-  'decred-block': 0xe0,
-  'decred-tx': 0xe1,
-  'ipld-ns': 0xe2,
-  'ipfs-ns': 0xe3,
-  'swarm-ns': 0xe4,
-  'ipns-ns': 0xe5,
-  'zeronet': 0xe6,
-  'secp256k1-pub': 0xe7,
-  'bls12_381-g1-pub': 0xea,
-  'bls12_381-g2-pub': 0xeb,
-  'x25519-pub': 0xec,
-  'ed25519-pub': 0xed,
-  'bls12_381-g1g2-pub': 0xee,
-  'dash-block': 0xf0,
-  'dash-tx': 0xf1,
-  'swarm-manifest': 0xfa,
-  'swarm-feed': 0xfb,
-  'udp': 0x0111,
-  'p2p-webrtc-star': 0x0113,
-  'p2p-webrtc-direct': 0x0114,
-  'p2p-stardust': 0x0115,
-  'p2p-circuit': 0x0122,
-  'dag-json': 0x0129,
-  'udt': 0x012d,
-  'utp': 0x012e,
-  'unix': 0x0190,
-  'p2p': 0x01a5,
-  'ipfs': 0x01a5,
-  'https': 0x01bb,
-  'onion': 0x01bc,
-  'onion3': 0x01bd,
-  'garlic64': 0x01be,
-  'garlic32': 0x01bf,
-  'tls': 0x01c0,
-  'quic': 0x01cc,
-  'ws': 0x01dd,
-  'wss': 0x01de,
-  'p2p-websocket-star': 0x01df,
-  'http': 0x01e0,
-  'json': 0x0200,
-  'messagepack': 0x0201,
-  'libp2p-peer-record': 0x0301,
-  'sha2-256-trunc254-padded': 0x1012,
-  'ripemd-128': 0x1052,
-  'ripemd-160': 0x1053,
-  'ripemd-256': 0x1054,
-  'ripemd-320': 0x1055,
-  'x11': 0x1100,
-  'p256-pub': 0x1200,
-  'p384-pub': 0x1201,
-  'p521-pub': 0x1202,
-  'ed448-pub': 0x1203,
-  'x448-pub': 0x1204,
-  'ed25519-priv': 0x1300,
-  'kangarootwelve': 0x1d01,
-  'sm3-256': 0x534d,
-  'blake2b-8': 0xb201,
-  'blake2b-16': 0xb202,
-  'blake2b-24': 0xb203,
-  'blake2b-32': 0xb204,
-  'blake2b-40': 0xb205,
-  'blake2b-48': 0xb206,
-  'blake2b-56': 0xb207,
-  'blake2b-64': 0xb208,
-  'blake2b-72': 0xb209,
-  'blake2b-80': 0xb20a,
-  'blake2b-88': 0xb20b,
-  'blake2b-96': 0xb20c,
-  'blake2b-104': 0xb20d,
-  'blake2b-112': 0xb20e,
-  'blake2b-120': 0xb20f,
-  'blake2b-128': 0xb210,
-  'blake2b-136': 0xb211,
-  'blake2b-144': 0xb212,
-  'blake2b-152': 0xb213,
-  'blake2b-160': 0xb214,
-  'blake2b-168': 0xb215,
-  'blake2b-176': 0xb216,
-  'blake2b-184': 0xb217,
-  'blake2b-192': 0xb218,
-  'blake2b-200': 0xb219,
-  'blake2b-208': 0xb21a,
-  'blake2b-216': 0xb21b,
-  'blake2b-224': 0xb21c,
-  'blake2b-232': 0xb21d,
-  'blake2b-240': 0xb21e,
-  'blake2b-248': 0xb21f,
-  'blake2b-256': 0xb220,
-  'blake2b-264': 0xb221,
-  'blake2b-272': 0xb222,
-  'blake2b-280': 0xb223,
-  'blake2b-288': 0xb224,
-  'blake2b-296': 0xb225,
-  'blake2b-304': 0xb226,
-  'blake2b-312': 0xb227,
-  'blake2b-320': 0xb228,
-  'blake2b-328': 0xb229,
-  'blake2b-336': 0xb22a,
-  'blake2b-344': 0xb22b,
-  'blake2b-352': 0xb22c,
-  'blake2b-360': 0xb22d,
-  'blake2b-368': 0xb22e,
-  'blake2b-376': 0xb22f,
-  'blake2b-384': 0xb230,
-  'blake2b-392': 0xb231,
-  'blake2b-400': 0xb232,
-  'blake2b-408': 0xb233,
-  'blake2b-416': 0xb234,
-  'blake2b-424': 0xb235,
-  'blake2b-432': 0xb236,
-  'blake2b-440': 0xb237,
-  'blake2b-448': 0xb238,
-  'blake2b-456': 0xb239,
-  'blake2b-464': 0xb23a,
-  'blake2b-472': 0xb23b,
-  'blake2b-480': 0xb23c,
-  'blake2b-488': 0xb23d,
-  'blake2b-496': 0xb23e,
-  'blake2b-504': 0xb23f,
-  'blake2b-512': 0xb240,
-  'blake2s-8': 0xb241,
-  'blake2s-16': 0xb242,
-  'blake2s-24': 0xb243,
-  'blake2s-32': 0xb244,
-  'blake2s-40': 0xb245,
-  'blake2s-48': 0xb246,
-  'blake2s-56': 0xb247,
-  'blake2s-64': 0xb248,
-  'blake2s-72': 0xb249,
-  'blake2s-80': 0xb24a,
-  'blake2s-88': 0xb24b,
-  'blake2s-96': 0xb24c,
-  'blake2s-104': 0xb24d,
-  'blake2s-112': 0xb24e,
-  'blake2s-120': 0xb24f,
-  'blake2s-128': 0xb250,
-  'blake2s-136': 0xb251,
-  'blake2s-144': 0xb252,
-  'blake2s-152': 0xb253,
-  'blake2s-160': 0xb254,
-  'blake2s-168': 0xb255,
-  'blake2s-176': 0xb256,
-  'blake2s-184': 0xb257,
-  'blake2s-192': 0xb258,
-  'blake2s-200': 0xb259,
-  'blake2s-208': 0xb25a,
-  'blake2s-216': 0xb25b,
-  'blake2s-224': 0xb25c,
-  'blake2s-232': 0xb25d,
-  'blake2s-240': 0xb25e,
-  'blake2s-248': 0xb25f,
-  'blake2s-256': 0xb260,
-  'skein256-8': 0xb301,
-  'skein256-16': 0xb302,
-  'skein256-24': 0xb303,
-  'skein256-32': 0xb304,
-  'skein256-40': 0xb305,
-  'skein256-48': 0xb306,
-  'skein256-56': 0xb307,
-  'skein256-64': 0xb308,
-  'skein256-72': 0xb309,
-  'skein256-80': 0xb30a,
-  'skein256-88': 0xb30b,
-  'skein256-96': 0xb30c,
-  'skein256-104': 0xb30d,
-  'skein256-112': 0xb30e,
-  'skein256-120': 0xb30f,
-  'skein256-128': 0xb310,
-  'skein256-136': 0xb311,
-  'skein256-144': 0xb312,
-  'skein256-152': 0xb313,
-  'skein256-160': 0xb314,
-  'skein256-168': 0xb315,
-  'skein256-176': 0xb316,
-  'skein256-184': 0xb317,
-  'skein256-192': 0xb318,
-  'skein256-200': 0xb319,
-  'skein256-208': 0xb31a,
-  'skein256-216': 0xb31b,
-  'skein256-224': 0xb31c,
-  'skein256-232': 0xb31d,
-  'skein256-240': 0xb31e,
-  'skein256-248': 0xb31f,
-  'skein256-256': 0xb320,
-  'skein512-8': 0xb321,
-  'skein512-16': 0xb322,
-  'skein512-24': 0xb323,
-  'skein512-32': 0xb324,
-  'skein512-40': 0xb325,
-  'skein512-48': 0xb326,
-  'skein512-56': 0xb327,
-  'skein512-64': 0xb328,
-  'skein512-72': 0xb329,
-  'skein512-80': 0xb32a,
-  'skein512-88': 0xb32b,
-  'skein512-96': 0xb32c,
-  'skein512-104': 0xb32d,
-  'skein512-112': 0xb32e,
-  'skein512-120': 0xb32f,
-  'skein512-128': 0xb330,
-  'skein512-136': 0xb331,
-  'skein512-144': 0xb332,
-  'skein512-152': 0xb333,
-  'skein512-160': 0xb334,
-  'skein512-168': 0xb335,
-  'skein512-176': 0xb336,
-  'skein512-184': 0xb337,
-  'skein512-192': 0xb338,
-  'skein512-200': 0xb339,
-  'skein512-208': 0xb33a,
-  'skein512-216': 0xb33b,
-  'skein512-224': 0xb33c,
-  'skein512-232': 0xb33d,
-  'skein512-240': 0xb33e,
-  'skein512-248': 0xb33f,
-  'skein512-256': 0xb340,
-  'skein512-264': 0xb341,
-  'skein512-272': 0xb342,
-  'skein512-280': 0xb343,
-  'skein512-288': 0xb344,
-  'skein512-296': 0xb345,
-  'skein512-304': 0xb346,
-  'skein512-312': 0xb347,
-  'skein512-320': 0xb348,
-  'skein512-328': 0xb349,
-  'skein512-336': 0xb34a,
-  'skein512-344': 0xb34b,
-  'skein512-352': 0xb34c,
-  'skein512-360': 0xb34d,
-  'skein512-368': 0xb34e,
-  'skein512-376': 0xb34f,
-  'skein512-384': 0xb350,
-  'skein512-392': 0xb351,
-  'skein512-400': 0xb352,
-  'skein512-408': 0xb353,
-  'skein512-416': 0xb354,
-  'skein512-424': 0xb355,
-  'skein512-432': 0xb356,
-  'skein512-440': 0xb357,
-  'skein512-448': 0xb358,
-  'skein512-456': 0xb359,
-  'skein512-464': 0xb35a,
-  'skein512-472': 0xb35b,
-  'skein512-480': 0xb35c,
-  'skein512-488': 0xb35d,
-  'skein512-496': 0xb35e,
-  'skein512-504': 0xb35f,
-  'skein512-512': 0xb360,
-  'skein1024-8': 0xb361,
-  'skein1024-16': 0xb362,
-  'skein1024-24': 0xb363,
-  'skein1024-32': 0xb364,
-  'skein1024-40': 0xb365,
-  'skein1024-48': 0xb366,
-  'skein1024-56': 0xb367,
-  'skein1024-64': 0xb368,
-  'skein1024-72': 0xb369,
-  'skein1024-80': 0xb36a,
-  'skein1024-88': 0xb36b,
-  'skein1024-96': 0xb36c,
-  'skein1024-104': 0xb36d,
-  'skein1024-112': 0xb36e,
-  'skein1024-120': 0xb36f,
-  'skein1024-128': 0xb370,
-  'skein1024-136': 0xb371,
-  'skein1024-144': 0xb372,
-  'skein1024-152': 0xb373,
-  'skein1024-160': 0xb374,
-  'skein1024-168': 0xb375,
-  'skein1024-176': 0xb376,
-  'skein1024-184': 0xb377,
-  'skein1024-192': 0xb378,
-  'skein1024-200': 0xb379,
-  'skein1024-208': 0xb37a,
-  'skein1024-216': 0xb37b,
-  'skein1024-224': 0xb37c,
-  'skein1024-232': 0xb37d,
-  'skein1024-240': 0xb37e,
-  'skein1024-248': 0xb37f,
-  'skein1024-256': 0xb380,
-  'skein1024-264': 0xb381,
-  'skein1024-272': 0xb382,
-  'skein1024-280': 0xb383,
-  'skein1024-288': 0xb384,
-  'skein1024-296': 0xb385,
-  'skein1024-304': 0xb386,
-  'skein1024-312': 0xb387,
-  'skein1024-320': 0xb388,
-  'skein1024-328': 0xb389,
-  'skein1024-336': 0xb38a,
-  'skein1024-344': 0xb38b,
-  'skein1024-352': 0xb38c,
-  'skein1024-360': 0xb38d,
-  'skein1024-368': 0xb38e,
-  'skein1024-376': 0xb38f,
-  'skein1024-384': 0xb390,
-  'skein1024-392': 0xb391,
-  'skein1024-400': 0xb392,
-  'skein1024-408': 0xb393,
-  'skein1024-416': 0xb394,
-  'skein1024-424': 0xb395,
-  'skein1024-432': 0xb396,
-  'skein1024-440': 0xb397,
-  'skein1024-448': 0xb398,
-  'skein1024-456': 0xb399,
-  'skein1024-464': 0xb39a,
-  'skein1024-472': 0xb39b,
-  'skein1024-480': 0xb39c,
-  'skein1024-488': 0xb39d,
-  'skein1024-496': 0xb39e,
-  'skein1024-504': 0xb39f,
-  'skein1024-512': 0xb3a0,
-  'skein1024-520': 0xb3a1,
-  'skein1024-528': 0xb3a2,
-  'skein1024-536': 0xb3a3,
-  'skein1024-544': 0xb3a4,
-  'skein1024-552': 0xb3a5,
-  'skein1024-560': 0xb3a6,
-  'skein1024-568': 0xb3a7,
-  'skein1024-576': 0xb3a8,
-  'skein1024-584': 0xb3a9,
-  'skein1024-592': 0xb3aa,
-  'skein1024-600': 0xb3ab,
-  'skein1024-608': 0xb3ac,
-  'skein1024-616': 0xb3ad,
-  'skein1024-624': 0xb3ae,
-  'skein1024-632': 0xb3af,
-  'skein1024-640': 0xb3b0,
-  'skein1024-648': 0xb3b1,
-  'skein1024-656': 0xb3b2,
-  'skein1024-664': 0xb3b3,
-  'skein1024-672': 0xb3b4,
-  'skein1024-680': 0xb3b5,
-  'skein1024-688': 0xb3b6,
-  'skein1024-696': 0xb3b7,
-  'skein1024-704': 0xb3b8,
-  'skein1024-712': 0xb3b9,
-  'skein1024-720': 0xb3ba,
-  'skein1024-728': 0xb3bb,
-  'skein1024-736': 0xb3bc,
-  'skein1024-744': 0xb3bd,
-  'skein1024-752': 0xb3be,
-  'skein1024-760': 0xb3bf,
-  'skein1024-768': 0xb3c0,
-  'skein1024-776': 0xb3c1,
-  'skein1024-784': 0xb3c2,
-  'skein1024-792': 0xb3c3,
-  'skein1024-800': 0xb3c4,
-  'skein1024-808': 0xb3c5,
-  'skein1024-816': 0xb3c6,
-  'skein1024-824': 0xb3c7,
-  'skein1024-832': 0xb3c8,
-  'skein1024-840': 0xb3c9,
-  'skein1024-848': 0xb3ca,
-  'skein1024-856': 0xb3cb,
-  'skein1024-864': 0xb3cc,
-  'skein1024-872': 0xb3cd,
-  'skein1024-880': 0xb3ce,
-  'skein1024-888': 0xb3cf,
-  'skein1024-896': 0xb3d0,
-  'skein1024-904': 0xb3d1,
-  'skein1024-912': 0xb3d2,
-  'skein1024-920': 0xb3d3,
-  'skein1024-928': 0xb3d4,
-  'skein1024-936': 0xb3d5,
-  'skein1024-944': 0xb3d6,
-  'skein1024-952': 0xb3d7,
-  'skein1024-960': 0xb3d8,
-  'skein1024-968': 0xb3d9,
-  'skein1024-976': 0xb3da,
-  'skein1024-984': 0xb3db,
-  'skein1024-992': 0xb3dc,
-  'skein1024-1000': 0xb3dd,
-  'skein1024-1008': 0xb3de,
-  'skein1024-1016': 0xb3df,
-  'skein1024-1024': 0xb3e0,
-  'poseidon-bls12_381-a2-fc1': 0xb401,
-  'poseidon-bls12_381-a2-fc1-sc': 0xb402,
-  'zeroxcert-imprint-256': 0xce11,
-  'fil-commitment-unsealed': 0xf101,
-  'fil-commitment-sealed': 0xf102,
-  'holochain-adr-v0': 0x807124,
-  'holochain-adr-v1': 0x817124,
-  'holochain-key-v0': 0x947124,
-  'holochain-key-v1': 0x957124,
-  'holochain-sig-v0': 0xa27124,
-  'holochain-sig-v1': 0xa37124,
-  'skynet-ns': 0xb19910
-})
-
-module.exports = { baseTable }
-
-
-/***/ }),
-
-/***/ 3404:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').ConstantNumberMap} ConstantNumberMap */
-
-const { baseTable } = __nccwpck_require__(6686)
-
-const constants = /** @type {ConstantNumberMap} */({})
-
-for (const [name, code] of Object.entries(baseTable)) {
-  const constant = name.toUpperCase().replace(/-/g, '_')
-  constants[constant] = code
-}
-
-module.exports = Object.freeze(constants)
-
-
-/***/ }),
-
-/***/ 4339:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-/**
- * Implementation of the multicodec specification.
- *
- * @module multicodec
- * @example
- * const multicodec = require('multicodec')
- *
- * const prefixedProtobuf = multicodec.addPrefix('protobuf', protobufBuffer)
- * // prefixedProtobuf 0x50...
- *
- */
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').CodecNumber} CodecNumber */
-
-const varint = __nccwpck_require__(6439)
-const intTable = __nccwpck_require__(9497)
-const codecNameToCodeVarint = __nccwpck_require__(3675)
-const util = __nccwpck_require__(9929)
-const uint8ArrayConcat = __nccwpck_require__(8153)
-
-/**
- * Prefix a buffer with a multicodec-packed.
- *
- * @param {CodecName|Uint8Array} multicodecStrOrCode
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
-function addPrefix (multicodecStrOrCode, data) {
-  let prefix
-
-  if (multicodecStrOrCode instanceof Uint8Array) {
-    prefix = util.varintUint8ArrayEncode(multicodecStrOrCode)
-  } else {
-    if (codecNameToCodeVarint[multicodecStrOrCode]) {
-      prefix = codecNameToCodeVarint[multicodecStrOrCode]
-    } else {
-      throw new Error('multicodec not recognized')
-    }
-  }
-  return uint8ArrayConcat([prefix, data], prefix.length + data.length)
-}
-
-/**
- * Decapsulate the multicodec-packed prefix from the data.
- *
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
-function rmPrefix (data) {
-  varint.decode(data)
-  return data.slice(varint.decode.bytes)
-}
-
-/**
- * Get the codec of the prefixed data.
- *
- * @param {Uint8Array} prefixedData
- * @returns {CodecName}
- */
-function getCodec (prefixedData) {
-  const code = varint.decode(prefixedData)
-  const codecName = intTable.get(code)
-  if (codecName === undefined) {
-    throw new Error(`Code ${code} not found`)
-  }
-  return codecName
-}
-
-/**
- * Get the name of the codec.
- *
- * @param {CodecNumber} codec
- * @returns {CodecName|undefined}
- */
-function getName (codec) {
-  return intTable.get(codec)
-}
-
-/**
- * Get the code of the codec
- *
- * @param {CodecName} name
- * @returns {CodecNumber}
- */
-function getNumber (name) {
-  const code = codecNameToCodeVarint[name]
-  if (code === undefined) {
-    throw new Error('Codec `' + name + '` not found')
-  }
-  return varint.decode(code)
-}
-
-/**
- * Get the code of the prefixed data.
- *
- * @param {Uint8Array} prefixedData
- * @returns {CodecNumber}
- */
-function getCode (prefixedData) {
-  return varint.decode(prefixedData)
-}
-
-/**
- * Get the code as varint of a codec name.
- *
- * @param {CodecName} codecName
- * @returns {Uint8Array}
- */
-function getCodeVarint (codecName) {
-  const code = codecNameToCodeVarint[codecName]
-  if (code === undefined) {
-    throw new Error('Codec `' + codecName + '` not found')
-  }
-  return code
-}
-
-/**
- * Get the varint of a code.
- *
- * @param {CodecNumber} code
- * @returns {Array.<number>}
- */
-function getVarint (code) {
-  return varint.encode(code)
-}
-
-// Make the constants top-level constants
-const constants = __nccwpck_require__(3404)
-
-// Human friendly names for printing, e.g. in error messages
-const print = __nccwpck_require__(9217)
-
-module.exports = {
-  addPrefix,
-  rmPrefix,
-  getCodec,
-  getName,
-  getNumber,
-  getCode,
-  getCodeVarint,
-  getVarint,
-  print,
-  ...constants
-}
-
-
-/***/ }),
-
-/***/ 9497:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').CodecNumber} CodecNumber */
-
-const { baseTable } = __nccwpck_require__(6686)
-
-/**
- * @type {Map<CodecNumber,CodecName>}
- */
-const nameTable = new Map()
-
-for (const encodingName in baseTable) {
-  const code = baseTable[encodingName]
-  nameTable.set(code, /** @type {CodecName} */(encodingName))
-}
-
-module.exports = Object.freeze(nameTable)
-
-
-/***/ }),
-
-/***/ 9217:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').CodecName} CodecName */
-/** @typedef {import('./generated-types').NumberNameMap} NumberNameMap */
-
-const { baseTable } = __nccwpck_require__(6686)
-
-const tableByCode = /** @type {NumberNameMap} */({})
-
-for (const [name, code] of Object.entries(baseTable)) {
-  if (tableByCode[code] === undefined) {
-    tableByCode[code] = /** @type {CodecName} **/(name)
-  }
-}
-
-module.exports = /** @type {NumberNameMap} */(Object.freeze(tableByCode))
-
-
-/***/ }),
-
-/***/ 9929:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(6439)
-const uint8ArrayToString = __nccwpck_require__(524)
-const uint8ArrayFromString = __nccwpck_require__(6790)
-
-module.exports = {
-  numberToUint8Array,
-  uint8ArrayToNumber,
-  varintUint8ArrayEncode,
-  varintEncode
-}
-
-function uint8ArrayToNumber (buf) {
-  return parseInt(uint8ArrayToString(buf, 'base16'), 16)
-}
-
-function numberToUint8Array (num) {
-  let hexString = num.toString(16)
-  if (hexString.length % 2 === 1) {
-    hexString = '0' + hexString
-  }
-  return uint8ArrayFromString(hexString, 'base16')
-}
-
-function varintUint8ArrayEncode (input) {
-  return Uint8Array.from(varint.encode(uint8ArrayToNumber(input)))
-}
-
-function varintEncode (num) {
-  return Uint8Array.from(varint.encode(num))
-}
-
-
-/***/ }),
-
-/***/ 3675:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-/** @typedef {import('./generated-types').NameUint8ArrayMap} NameUint8ArrayMap */
-
-const { baseTable } = __nccwpck_require__(6686)
-const varintEncode = __nccwpck_require__(9929).varintEncode
-
-const varintTable = /** @type {NameUint8ArrayMap} */ ({})
-
-for (const encodingName in baseTable) {
-  const code = baseTable[encodingName]
-  varintTable[encodingName] = varintEncode(code)
-}
-
-module.exports = Object.freeze(varintTable)
-
-
-/***/ }),
-
-/***/ 8153:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Returns a new Uint8Array created by concatenating the passed ArrayLikes
- *
- * @param {Array<ArrayLike<number>>} arrays
- * @param {Number} length
- * @returns {Uint8Array}
- */
-function concat (arrays, length) {
-  if (!length) {
-    length = arrays.reduce((acc, curr) => acc + curr.length, 0)
-  }
-
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrays) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = concat
-
-
-/***/ }),
-
-/***/ 6790:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(1989)
-const { TextEncoder } = __nccwpck_require__(2287)
-const utf8Encoder = new TextEncoder()
-
-/**
- * Interperets each character in a string as a byte and
- * returns a Uint8Array of those bytes.
- *
- * @param {String} string The string to turn into an array
- * @returns {Uint8Array}
- */
-function asciiStringToUint8Array (string) {
-  const array = new Uint8Array(string.length)
-
-  for (let i = 0; i < string.length; i++) {
-    array[i] = string.charCodeAt(i)
-  }
-
-  return array
-}
-
-/**
- * Create a `Uint8Array` from the passed string
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {String} string
- * @param {String} [encoding=utf8] utf8, base16, base64, base64urlpad, etc
- * @returns {Uint8Array}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function fromString (string, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Encoder.encode(string)
-  }
-
-  if (encoding === 'ascii') {
-    return asciiStringToUint8Array(string)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.decode(string)
-}
-
-module.exports = fromString
-
-
-/***/ }),
-
-/***/ 524:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(1989)
-const { TextDecoder } = __nccwpck_require__(2287)
-const utf8Decoder = new TextDecoder('utf8')
-
-/**
- * Turns a Uint8Array of bytes into a string with each
- * character being the char code of the corresponding byte
- *
- * @param {Uint8Array} array The array to turn into a string
- * @returns {String}
- */
-function uint8ArrayToAsciiString (array) {
-  let string = ''
-
-  for (let i = 0; i < array.length; i++) {
-    string += String.fromCharCode(array[i])
-  }
-  return string
-}
-
-/**
- * Turns a `Uint8Array` into a string.
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {Uint8Array} array The array to turn into a string
- * @param {String} [encoding=utf8] The encoding to use
- * @returns {String}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function toString (array, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Decoder.decode(array)
-  }
-
-  if (encoding === 'ascii') {
-    return uint8ArrayToAsciiString(array)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.encode(array)
-}
-
-module.exports = toString
-
-
-/***/ }),
-
-/***/ 5672:
-/***/ ((module) => {
-
-module.exports = read
-
-var MSB = 0x80
-  , REST = 0x7F
-
-function read(buf, offset) {
-  var res    = 0
-    , offset = offset || 0
-    , shift  = 0
-    , counter = offset
-    , b
-    , l = buf.length
-
-  do {
-    if (counter >= l || shift > 49) {
-      read.bytes = 0
-      throw new RangeError('Could not decode varint')
-    }
-    b = buf[counter++]
-    res += shift < 28
-      ? (b & REST) << shift
-      : (b & REST) * Math.pow(2, shift)
-    shift += 7
-  } while (b >= MSB)
-
-  read.bytes = counter - offset
-
-  return res
-}
-
-
-/***/ }),
-
-/***/ 8214:
-/***/ ((module) => {
-
-module.exports = encode
-
-var MSB = 0x80
-  , REST = 0x7F
-  , MSBALL = ~REST
-  , INT = Math.pow(2, 31)
-
-function encode(num, out, offset) {
-  if (Number.MAX_SAFE_INTEGER && num > Number.MAX_SAFE_INTEGER) {
-    encode.bytes = 0
-    throw new RangeError('Could not encode varint')
-  }
-  out = out || []
-  offset = offset || 0
-  var oldOffset = offset
-
-  while(num >= INT) {
-    out[offset++] = (num & 0xFF) | MSB
-    num /= 128
-  }
-  while(num & MSBALL) {
-    out[offset++] = (num & 0xFF) | MSB
-    num >>>= 7
-  }
-  out[offset] = num | 0
-  
-  encode.bytes = offset - oldOffset + 1
-  
-  return out
-}
-
-
-/***/ }),
-
-/***/ 6439:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-module.exports = {
-    encode: __nccwpck_require__(8214)
-  , decode: __nccwpck_require__(5672)
-  , encodingLength: __nccwpck_require__(4385)
-}
-
-
-/***/ }),
-
-/***/ 4385:
-/***/ ((module) => {
-
-
-var N1 = Math.pow(2,  7)
-var N2 = Math.pow(2, 14)
-var N3 = Math.pow(2, 21)
-var N4 = Math.pow(2, 28)
-var N5 = Math.pow(2, 35)
-var N6 = Math.pow(2, 42)
-var N7 = Math.pow(2, 49)
-var N8 = Math.pow(2, 56)
-var N9 = Math.pow(2, 63)
-
-module.exports = function (value) {
-  return (
-    value < N1 ? 1
-  : value < N2 ? 2
-  : value < N3 ? 3
-  : value < N4 ? 4
-  : value < N5 ? 5
-  : value < N6 ? 6
-  : value < N7 ? 7
-  : value < N8 ? 8
-  : value < N9 ? 9
-  :              10
-  )
+  codec: genCid.codec,
+  defaultHashAlg: genCid.defaultHashAlg,
+  serialize,
+  deserialize,
+  cid
 }
 
 
@@ -29403,23 +27191,31 @@ module.exports = function (value) {
 
 const CID = __nccwpck_require__(9016)
 const multihashing = __nccwpck_require__(7761)
-const multicodec = __nccwpck_require__(4339)
+const { multihash } = multihashing
+const multicodec = __nccwpck_require__(7081)
 
-// binary resolver
+/**
+ * @typedef {import('cids').CIDVersion} CIDVersion
+ * @typedef {import('multihashing-async').multihash.HashCode} HashCode
+ * @typedef {import('interface-ipld-format').Format<Uint8Array>} RawFormat
+ */
+
+/**
+ * Binary resolver
+ *
+ * @type {RawFormat}
+ */
 module.exports = {
   codec: multicodec.RAW,
-  defaultHashAlg: multicodec.SHA2_256,
+  defaultHashAlg: multihash.names['sha2-256'],
   resolver: {
     /**
      * Resolves a path within a Raw block.
      *
      * Always returns the raw data as value without any remainderPath.
      *
-     * @param {Buffer} binaryBlob - Binary representation of a PB block
+     * @param {Uint8Array} binaryBlob - Binary representation of a PB block
      * @param {string} [path='/'] - Path that should be resolved.  Must be '/' or an exception is thrown
-     * @returns {Object} result - Result of the path it it was resolved successfully
-     * @returns {*} result.value - The raw data
-     * @returns {string} result.remainderPath - An empty string
      */
     resolve: (binaryBlob, path) => {
       if (path !== '/') {
@@ -29435,38 +27231,43 @@ module.exports = {
      * Return all available paths of a block.
      *
      * @generator
-     * @param {Buffer} binaryBlob - The raw data
-     * @returns {Object} - Finished generator with `done: true`
+     * @param {Uint8Array} binaryBlob - The raw data
      */
-    tree: (binaryBlob) => {
-      return {
-        done: true
-      }
+    async * tree (binaryBlob) {
+
     }
   },
   util: {
+    /**
+     * @param {Uint8Array} data
+     */
     deserialize: (data) => {
       return data
     },
+    /**
+     * @param {Uint8Array} data
+     */
     serialize: (data) => {
       return data
     },
     /**
      * Calculate the CID of the binary blob.
      *
-     * @param {Object} binaryBlob - Encoded IPLD Node
+     * @param {Uint8Array} binaryBlob - Encoded IPLD Node
      * @param {Object} [userOptions] - Options to create the CID
-     * @param {number} [userOptions.cidVersion=1] - CID version number
-     * @param {string} [UserOptions.hashAlg] - Defaults to the defaultHashAlg of the format
-     * @returns {Promise.<CID>}
+     * @param {CIDVersion} [userOptions.cidVersion=1] - CID version number
+     * @param {HashCode} [userOptions.hashAlg=multihash.names['sha2-256']] - Defaults to the defaultHashAlg of the format
      */
-    cid: async (binaryBlob, userOptions) => {
-      const defaultOptions = { cidVersion: 1, hashAlg: module.exports.defaultHashAlg }
-      const options = Object.assign(defaultOptions, userOptions)
+    cid: async (binaryBlob, userOptions = {}) => {
+      const options = {
+        cidVersion: userOptions.cidVersion == null ? 1 : userOptions.cidVersion,
+        hashAlg: userOptions.hashAlg == null ? module.exports.defaultHashAlg : userOptions.hashAlg
+      }
 
-      const multihash = await multihashing(binaryBlob, options.hashAlg)
-      const codecName = multicodec.print[module.exports.codec]
-      const cid = new CID(options.cidVersion, codecName, multihash)
+      const hashName = multihash.codes[options.hashAlg]
+      const hash = await multihashing(binaryBlob, hashName)
+      const codecName = multicodec.getNameFromCode(module.exports.codec)
+      const cid = new CID(options.cidVersion, codecName, hash)
 
       return cid
     }
@@ -29782,7 +27583,7 @@ module.exports = async (source, options) => {
   let res, type
   for await (const chunk of source) {
     if (!res) {
-      type = options.type || typeof chunk === 'string' ? 'string' : 'buffer'
+      type = options.type || (typeof chunk === 'string' ? 'string' : 'buffer')
       res = TypeDefault[type]()
     }
 
@@ -29805,8 +27606,7 @@ module.exports = async (source, options) => {
 "use strict";
 
 
-// @ts-ignore
-const fs = __nccwpck_require__(5630)
+const fs = __nccwpck_require__(5747).promises
 const path = __nccwpck_require__(5622)
 const minimatch = __nccwpck_require__(3973)
 
@@ -29829,7 +27629,7 @@ const minimatch = __nccwpck_require__(3973)
  * @param {Options} [options]
  * @returns {AsyncIterable<string>}
  */
-module.exports = async function * glob (dir, pattern, options = {}) {
+async function * glob (dir, pattern, options = {}) {
   const absoluteDir = path.resolve(dir)
   const relativeDir = path.relative(options.cwd || process.cwd(), dir)
 
@@ -29877,6 +27677,8 @@ async function * _glob (base, dir, pattern, options) {
     }
   }
 }
+
+module.exports = glob
 
 
 /***/ }),
@@ -30077,14 +27879,14 @@ module.exports = source => {
 const { Buffer } = __nccwpck_require__(3407)
 const BufferList = __nccwpck_require__(3664)
 
-var ZERO_OFFSET = '0'.charCodeAt(0)
-var USTAR_MAGIC = Buffer.from('ustar\x00', 'binary')
-var GNU_MAGIC = Buffer.from('ustar\x20', 'binary')
-var GNU_VER = Buffer.from('\x20\x00', 'binary')
-var MAGIC_OFFSET = 257
-var VERSION_OFFSET = 263
+const ZERO_OFFSET = '0'.charCodeAt(0)
+const USTAR_MAGIC = Buffer.from('ustar\x00', 'binary')
+const GNU_MAGIC = Buffer.from('ustar\x20', 'binary')
+const GNU_VER = Buffer.from('\x20\x00', 'binary')
+const MAGIC_OFFSET = 257
+const VERSION_OFFSET = 263
 
-var clamp = function (index, len, defaultValue) {
+const clamp = function (index, len, defaultValue) {
   if (typeof index !== 'number') return defaultValue
   index = ~~index // Coerce to integer.
   if (index >= len) return len
@@ -30094,7 +27896,7 @@ var clamp = function (index, len, defaultValue) {
   return 0
 }
 
-var toType = function (flag) {
+const toType = function (flag) {
   switch (flag) {
     case 0:
       return 'file'
@@ -30126,17 +27928,17 @@ var toType = function (flag) {
   return null
 }
 
-var indexOf = function (block, num, offset, end) {
+const indexOf = function (block, num, offset, end) {
   for (; offset < end; offset++) {
     if (block.get(offset) === num) return offset
   }
   return end
 }
 
-var cksum = function (block) {
-  var sum = 8 * 32
-  for (var i = 0; i < 148; i++) sum += block.get(i)
-  for (var j = 156; j < 512; j++) sum += block.get(j)
+const cksum = function (block) {
+  let sum = 8 * 32
+  for (let i = 0; i < 148; i++) sum += block.get(i)
+  for (let j = 156; j < 512; j++) sum += block.get(j)
   return sum
 }
 
@@ -30148,16 +27950,16 @@ var cksum = function (block) {
 function parse256 (buf) {
   // first byte MUST be either 80 or FF
   // 80 for positive, FF for 2's comp
-  var positive
+  let positive
   if (buf.get(0) === 0x80) positive = true
   else if (buf.get(0) === 0xFF) positive = false
   else return null
 
   // build up a base-256 tuple from the least sig to the highest
-  var zero = false
-  var tuple = []
-  for (var i = buf.length - 1; i > 0; i--) {
-    var byte = buf.get(i)
+  let zero = false
+  const tuple = []
+  for (let i = buf.length - 1; i > 0; i--) {
+    const byte = buf.get(i)
     if (positive) tuple.push(byte)
     else if (zero && byte === 0) tuple.push(0)
     else if (zero) {
@@ -30166,16 +27968,16 @@ function parse256 (buf) {
     } else tuple.push(0xFF - byte)
   }
 
-  var sum = 0
-  var l = tuple.length
-  for (i = 0; i < l; i++) {
+  let sum = 0
+  const l = tuple.length
+  for (let i = 0; i < l; i++) {
     sum += tuple[i] * Math.pow(256, i)
   }
 
   return positive ? sum : -1 * sum
 }
 
-var decodeOct = function (val, offset, length) {
+const decodeOct = function (val, offset, length) {
   val = val.shallowSlice(offset, offset + length)
   offset = 0
 
@@ -30185,14 +27987,14 @@ var decodeOct = function (val, offset, length) {
   } else {
     // Older versions of tar can prefix with spaces
     while (offset < val.length && val.get(offset) === 32) offset++
-    var end = clamp(indexOf(val, 32, offset, val.length), val.length, val.length)
+    const end = clamp(indexOf(val, 32, offset, val.length), val.length, val.length)
     while (offset < end && val.get(offset) === 0) offset++
     if (end === offset) return 0
     return parseInt(val.shallowSlice(offset, end).toString(), 8)
   }
 }
 
-var decodeStr = function (val, offset, length, encoding) {
+const decodeStr = function (val, offset, length, encoding) {
   return val.shallowSlice(offset, indexOf(val, 0, offset, offset + length)).toString(encoding)
 }
 
@@ -30203,16 +28005,16 @@ exports.decodeLongPath = function (buf, encoding) {
 
 exports.decodePax = function (buf) {
   buf = BufferList.isBufferList(buf) ? buf : new BufferList(buf)
-  var result = {}
+  const result = {}
 
   while (buf.length) {
-    var i = 0
+    let i = 0
     while (i < buf.length && buf.get(i) !== 32) i++
-    var len = parseInt(buf.shallowSlice(0, i).toString(), 10)
+    const len = parseInt(buf.shallowSlice(0, i).toString(), 10)
     if (!len) return result
 
-    var b = buf.shallowSlice(i + 1, len - 1).toString()
-    var keyIndex = b.indexOf('=')
+    const b = buf.shallowSlice(i + 1, len - 1).toString()
+    const keyIndex = b.indexOf('=')
     if (keyIndex === -1) return result
     result[b.slice(0, keyIndex)] = b.slice(keyIndex + 1)
 
@@ -30224,22 +28026,22 @@ exports.decodePax = function (buf) {
 
 exports.decode = function (buf, filenameEncoding) {
   buf = BufferList.isBufferList(buf) ? buf : new BufferList(buf)
-  var typeflag = buf.get(156) === 0 ? 0 : buf.get(156) - ZERO_OFFSET
+  let typeflag = buf.get(156) === 0 ? 0 : buf.get(156) - ZERO_OFFSET
 
-  var name = decodeStr(buf, 0, 100, filenameEncoding)
-  var mode = decodeOct(buf, 100, 8)
-  var uid = decodeOct(buf, 108, 8)
-  var gid = decodeOct(buf, 116, 8)
-  var size = decodeOct(buf, 124, 12)
-  var mtime = decodeOct(buf, 136, 12)
-  var type = toType(typeflag)
-  var linkname = buf.get(157) === 0 ? null : decodeStr(buf, 157, 100, filenameEncoding)
-  var uname = decodeStr(buf, 265, 32)
-  var gname = decodeStr(buf, 297, 32)
-  var devmajor = decodeOct(buf, 329, 8)
-  var devminor = decodeOct(buf, 337, 8)
+  let name = decodeStr(buf, 0, 100, filenameEncoding)
+  const mode = decodeOct(buf, 100, 8)
+  const uid = decodeOct(buf, 108, 8)
+  const gid = decodeOct(buf, 116, 8)
+  const size = decodeOct(buf, 124, 12)
+  const mtime = decodeOct(buf, 136, 12)
+  const type = toType(typeflag)
+  const linkname = buf.get(157) === 0 ? null : decodeStr(buf, 157, 100, filenameEncoding)
+  const uname = decodeStr(buf, 265, 32)
+  const gname = decodeStr(buf, 297, 32)
+  const devmajor = decodeOct(buf, 329, 8)
+  const devminor = decodeOct(buf, 337, 8)
 
-  var c = cksum(buf)
+  const c = cksum(buf)
 
   // checksum is still initial value if header was null.
   if (c === 8 * 32) return null
@@ -30414,7 +28216,7 @@ module.exports = options => {
 
         // Incase the body was not consumed entirely...
         if (bytesRemaining) {
-          for await (const _ of body) {} // eslint-disable-line no-unused-vars
+          for await (const _ of body) {} // eslint-disable-line no-unused-vars,no-empty
         }
 
         await discardPadding(reader, header.size)
@@ -30499,18 +28301,18 @@ module.exports = function LteReader (source) {
 
 const { Buffer } = __nccwpck_require__(3407)
 
-var alloc = Buffer.alloc
+const alloc = Buffer.alloc
 
-var ZEROS = '0000000000000000000'
-var SEVENS = '7777777777777777777'
-var ZERO_OFFSET = '0'.charCodeAt(0)
-var USTAR_MAGIC = Buffer.from('ustar\x00', 'binary')
-var USTAR_VER = Buffer.from('00', 'binary')
-var MASK = parseInt('7777', 8)
-var MAGIC_OFFSET = 257
-var VERSION_OFFSET = 263
+const ZEROS = '0000000000000000000'
+const SEVENS = '7777777777777777777'
+const ZERO_OFFSET = '0'.charCodeAt(0)
+const USTAR_MAGIC = Buffer.from('ustar\x00', 'binary')
+const USTAR_VER = Buffer.from('00', 'binary')
+const MASK = parseInt('7777', 8)
+const MAGIC_OFFSET = 257
+const VERSION_OFFSET = 263
 
-var toTypeflag = function (flag) {
+const toTypeflag = function (flag) {
   switch (flag) {
     case 'file':
       return 0
@@ -30535,34 +28337,34 @@ var toTypeflag = function (flag) {
   return 0
 }
 
-var cksum = function (block) {
-  var sum = 8 * 32
-  for (var i = 0; i < 148; i++) sum += block[i]
-  for (var j = 156; j < 512; j++) sum += block[j]
+const cksum = function (block) {
+  let sum = 8 * 32
+  for (let i = 0; i < 148; i++) sum += block[i]
+  for (let j = 156; j < 512; j++) sum += block[j]
   return sum
 }
 
-var encodeOct = function (val, n) {
+const encodeOct = function (val, n) {
   val = val.toString(8)
   if (val.length > n) return SEVENS.slice(0, n) + ' '
   else return ZEROS.slice(0, n - val.length) + val + ' '
 }
 
-var addLength = function (str) {
-  var len = Buffer.byteLength(str)
-  var digits = Math.floor(Math.log(len) / Math.log(10)) + 1
+const addLength = function (str) {
+  const len = Buffer.byteLength(str)
+  let digits = Math.floor(Math.log(len) / Math.log(10)) + 1
   if (len + digits >= Math.pow(10, digits)) digits++
 
   return (len + digits) + str
 }
 
 exports.encodePax = function (opts) { // TODO: encode more stuff in pax
-  var result = ''
+  let result = ''
   if (opts.name) result += addLength(' path=' + opts.name + '\n')
   if (opts.linkname) result += addLength(' linkpath=' + opts.linkname + '\n')
-  var pax = opts.pax
+  const pax = opts.pax
   if (pax) {
-    for (var key in pax) {
+    for (const key in pax) {
       result += addLength(' ' + key + '=' + pax[key] + '\n')
     }
   }
@@ -30570,15 +28372,15 @@ exports.encodePax = function (opts) { // TODO: encode more stuff in pax
 }
 
 exports.encode = function (opts) {
-  var buf = alloc(512)
-  var name = opts.name
-  var prefix = ''
+  const buf = alloc(512)
+  let name = opts.name
+  let prefix = ''
 
   if (opts.typeflag === 5 && name[name.length - 1] !== '/') name += '/'
   if (Buffer.byteLength(name) !== name.length) return null // utf-8
 
   while (Buffer.byteLength(name) > 100) {
-    var i = name.indexOf('/')
+    const i = name.indexOf('/')
     if (i === -1) return null
     prefix += prefix ? '/' + name.slice(0, i) : name.slice(0, i)
     name = name.slice(i + 1)
@@ -30759,9 +28561,9 @@ module.exports = function toDuplex (duplex, options) {
     Stream = Readable
   }
 
-  Object.assign(
-    options,
-    duplex.source ? {
+  let readable
+  if (duplex.source) {
+    readable = {
       async read (size) {
         if (reading) return
         reading = true
@@ -30778,16 +28580,22 @@ module.exports = function toDuplex (duplex, options) {
           reading = false
         }
       }
-    } : {},
-    duplex.sink ? {
+    }
+  }
+
+  let writable
+  if (duplex.sink) {
+    writable = {
       write (chunk, enc, cb) {
         fifo.push(chunk).then(() => cb(), cb)
       },
       final (cb) {
         fifo.push(END_CHUNK).then(() => cb(), cb)
       }
-    } : {}
-  )
+    }
+  }
+
+  Object.assign(options, readable, writable)
 
   const stream = new Stream(options)
 
@@ -31522,122 +29330,6 @@ module.exports = function toTransform (transform, options) {
     }
   }
 })();
-
-
-/***/ }),
-
-/***/ 6160:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-let _fs
-try {
-  _fs = __nccwpck_require__(7758)
-} catch (_) {
-  _fs = __nccwpck_require__(5747)
-}
-const universalify = __nccwpck_require__(9046)
-const { stringify, stripBom } = __nccwpck_require__(5902)
-
-async function _readFile (file, options = {}) {
-  if (typeof options === 'string') {
-    options = { encoding: options }
-  }
-
-  const fs = options.fs || _fs
-
-  const shouldThrow = 'throws' in options ? options.throws : true
-
-  let data = await universalify.fromCallback(fs.readFile)(file, options)
-
-  data = stripBom(data)
-
-  let obj
-  try {
-    obj = JSON.parse(data, options ? options.reviver : null)
-  } catch (err) {
-    if (shouldThrow) {
-      err.message = `${file}: ${err.message}`
-      throw err
-    } else {
-      return null
-    }
-  }
-
-  return obj
-}
-
-const readFile = universalify.fromPromise(_readFile)
-
-function readFileSync (file, options = {}) {
-  if (typeof options === 'string') {
-    options = { encoding: options }
-  }
-
-  const fs = options.fs || _fs
-
-  const shouldThrow = 'throws' in options ? options.throws : true
-
-  try {
-    let content = fs.readFileSync(file, options)
-    content = stripBom(content)
-    return JSON.parse(content, options.reviver)
-  } catch (err) {
-    if (shouldThrow) {
-      err.message = `${file}: ${err.message}`
-      throw err
-    } else {
-      return null
-    }
-  }
-}
-
-async function _writeFile (file, obj, options = {}) {
-  const fs = options.fs || _fs
-
-  const str = stringify(obj, options)
-
-  await universalify.fromCallback(fs.writeFile)(file, str, options)
-}
-
-const writeFile = universalify.fromPromise(_writeFile)
-
-function writeFileSync (file, obj, options = {}) {
-  const fs = options.fs || _fs
-
-  const str = stringify(obj, options)
-  // not sure if fs.writeFileSync returns anything, but just in case
-  return fs.writeFileSync(file, str, options)
-}
-
-const jsonfile = {
-  readFile,
-  readFileSync,
-  writeFile,
-  writeFileSync
-}
-
-module.exports = jsonfile
-
-
-/***/ }),
-
-/***/ 5902:
-/***/ ((module) => {
-
-function stringify (obj, { EOL = '\n', finalEOL = true, replacer = null, spaces } = {}) {
-  const EOF = finalEOL ? EOL : ''
-  const str = JSON.stringify(obj, replacer, spaces)
-
-  return str.replace(/\n/g, EOL) + EOF
-}
-
-function stripBom (content) {
-  // we do this because JSON.parse would convert it to a utf8 string if encoding wasn't specified
-  if (Buffer.isBuffer(content)) content = content.toString('utf8')
-  return content.replace(/^\uFEFF/, '')
-}
-
-module.exports = { stringify, stripBom }
 
 
 /***/ }),
@@ -32923,7 +30615,7 @@ function plural(ms, msAbs, n, name) {
 /***/ 2849:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const Multiaddr = __nccwpck_require__(5858)
+const { Multiaddr } = __nccwpck_require__(5858)
 
 const reduceValue = (_, v) => v
 const tcpUri = (str, port, parts, opts) => {
@@ -32969,7 +30661,7 @@ const Reducers = {
 }
 
 module.exports = (multiaddr, opts) => {
-  const ma = Multiaddr(multiaddr)
+  const ma = new Multiaddr(multiaddr)
   const parts = multiaddr.toString().split('/').slice(1)
   return ma
     .tuples()
@@ -32987,663 +30679,119 @@ module.exports = (multiaddr, opts) => {
 
 /***/ }),
 
-/***/ 7487:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ 938:
+/***/ ((module) => {
 
-"use strict";
+module.exports = read
 
+var MSB = 0x80
+  , REST = 0x7F
 
-const { encodeText } = __nccwpck_require__(61)
+function read(buf, offset) {
+  var res    = 0
+    , offset = offset || 0
+    , shift  = 0
+    , counter = offset
+    , b
+    , l = buf.length
 
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import("./types").BaseName} BaseName */
-/** @typedef {import("./types").BaseCode} BaseCode */
-
-/**
- * Class to encode/decode in the supported Bases
- *
- */
-class Base {
-  /**
-   * @param {BaseName} name
-   * @param {BaseCode} code
-   * @param {CodecFactory} factory
-   * @param {string} alphabet
-   */
-  constructor (name, code, factory, alphabet) {
-    this.name = name
-    this.code = code
-    this.codeBuf = encodeText(this.code)
-    this.alphabet = alphabet
-    this.codec = factory(alphabet)
-  }
-
-  /**
-   * @param {Uint8Array} buf
-   * @returns {string}
-   */
-  encode (buf) {
-    return this.codec.encode(buf)
-  }
-
-  /**
-   * @param {string} string
-   * @returns {Uint8Array}
-   */
-  decode (string) {
-    for (const char of string) {
-      if (this.alphabet && this.alphabet.indexOf(char) < 0) {
-        throw new Error(`invalid character '${char}' in '${string}'`)
-      }
+  do {
+    if (counter >= l || shift > 49) {
+      read.bytes = 0
+      throw new RangeError('Could not decode varint')
     }
-    return this.codec.decode(string)
-  }
-}
+    b = buf[counter++]
+    res += shift < 28
+      ? (b & REST) << shift
+      : (b & REST) * Math.pow(2, shift)
+    shift += 7
+  } while (b >= MSB)
 
-module.exports = Base
+  read.bytes = counter - offset
+
+  return res
+}
 
 
 /***/ }),
 
-/***/ 8301:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ 4039:
+/***/ ((module) => {
 
-"use strict";
+module.exports = encode
 
+var MSB = 0x80
+  , REST = 0x7F
+  , MSBALL = ~REST
+  , INT = Math.pow(2, 31)
 
-const baseX = __nccwpck_require__(3841)
-const Base = __nccwpck_require__(7487)
-const { rfc4648 } = __nccwpck_require__(8373)
-const { decodeText, encodeText } = __nccwpck_require__(61)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import('./types').Codec} Codec */
-/** @typedef {import('./types').BaseName} BaseName */
-/** @typedef {import('./types').BaseCode} BaseCode */
-
-/** @type {CodecFactory} */
-const identity = () => {
-  return {
-    encode: decodeText,
-    decode: encodeText
+function encode(num, out, offset) {
+  if (Number.MAX_SAFE_INTEGER && num > Number.MAX_SAFE_INTEGER) {
+    encode.bytes = 0
+    throw new RangeError('Could not encode varint')
   }
+  out = out || []
+  offset = offset || 0
+  var oldOffset = offset
+
+  while(num >= INT) {
+    out[offset++] = (num & 0xFF) | MSB
+    num /= 128
+  }
+  while(num & MSBALL) {
+    out[offset++] = (num & 0xFF) | MSB
+    num >>>= 7
+  }
+  out[offset] = num | 0
+  
+  encode.bytes = offset - oldOffset + 1
+  
+  return out
 }
 
-/**
- *
- * name, code, implementation, alphabet
- *
- * @type {Array<[BaseName, BaseCode, CodecFactory, string]>}
- */
-const constants = [
-  ['identity', '\x00', identity, ''],
-  ['base2', '0', rfc4648(1), '01'],
-  ['base8', '7', rfc4648(3), '01234567'],
-  ['base10', '9', baseX, '0123456789'],
-  ['base16', 'f', rfc4648(4), '0123456789abcdef'],
-  ['base16upper', 'F', rfc4648(4), '0123456789ABCDEF'],
-  ['base32hex', 'v', rfc4648(5), '0123456789abcdefghijklmnopqrstuv'],
-  ['base32hexupper', 'V', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV'],
-  ['base32hexpad', 't', rfc4648(5), '0123456789abcdefghijklmnopqrstuv='],
-  ['base32hexpadupper', 'T', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV='],
-  ['base32', 'b', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567'],
-  ['base32upper', 'B', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'],
-  ['base32pad', 'c', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567='],
-  ['base32padupper', 'C', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567='],
-  ['base32z', 'h', rfc4648(5), 'ybndrfg8ejkmcpqxot1uwisza345h769'],
-  ['base36', 'k', baseX, '0123456789abcdefghijklmnopqrstuvwxyz'],
-  ['base36upper', 'K', baseX, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
-  ['base58btc', 'z', baseX, '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'],
-  ['base58flickr', 'Z', baseX, '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'],
-  ['base64', 'm', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'],
-  ['base64pad', 'M', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='],
-  ['base64url', 'u', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'],
-  ['base64urlpad', 'U', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=']
-]
 
-/** @type {Record<BaseName,Base>} */
-const names = constants.reduce((prev, tupple) => {
-  prev[tupple[0]] = new Base(tupple[0], tupple[1], tupple[2], tupple[3])
-  return prev
-}, /** @type {Record<BaseName,Base>} */({}))
+/***/ }),
 
-/** @type {Record<BaseCode,Base>} */
-const codes = constants.reduce((prev, tupple) => {
-  prev[tupple[1]] = names[tupple[0]]
-  return prev
-}, /** @type {Record<BaseCode,Base>} */({}))
+/***/ 2981:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 module.exports = {
-  names,
-  codes
+    encode: __nccwpck_require__(4039)
+  , decode: __nccwpck_require__(938)
+  , encodingLength: __nccwpck_require__(7389)
 }
 
 
 /***/ }),
 
-/***/ 6487:
-/***/ ((module, exports, __nccwpck_require__) => {
-
-"use strict";
-/**
- * Implementation of the [multibase](https://github.com/multiformats/multibase) specification.
- *
- */
-
-
-const constants = __nccwpck_require__(8301)
-const { encodeText, decodeText, concat } = __nccwpck_require__(61)
-
-/** @typedef {import('./base')} Base */
-/** @typedef {import("./types").BaseNameOrCode} BaseNameOrCode */
-/** @typedef {import("./types").BaseCode} BaseCode */
-/** @typedef {import("./types").BaseName} BaseName */
-
-/**
- * Create a new Uint8Array with the multibase varint+code.
- *
- * @param {BaseNameOrCode} nameOrCode - The multibase name or code number.
- * @param {Uint8Array} buf - The data to be prefixed with multibase.
- * @returns {Uint8Array}
- * @throws {Error} Will throw if the encoding is not supported
- */
-function multibase (nameOrCode, buf) {
-  if (!buf) {
-    throw new Error('requires an encoded Uint8Array')
-  }
-  const { name, codeBuf } = encoding(nameOrCode)
-  validEncode(name, buf)
-
-  return concat([codeBuf, buf], codeBuf.length + buf.length)
-}
-
-/**
- * Encode data with the specified base and add the multibase prefix.
- *
- * @param {BaseNameOrCode} nameOrCode - The multibase name or code number.
- * @param {Uint8Array} buf - The data to be encoded.
- * @returns {Uint8Array}
- * @throws {Error} Will throw if the encoding is not supported
- *
- */
-function encode (nameOrCode, buf) {
-  const enc = encoding(nameOrCode)
-  const data = encodeText(enc.encode(buf))
-
-  return concat([enc.codeBuf, data], enc.codeBuf.length + data.length)
-}
-
-/**
- * Takes a Uint8Array or string encoded with multibase header, decodes it and
- * returns the decoded buffer
- *
- * @param {Uint8Array|string} data
- * @returns {Uint8Array}
- * @throws {Error} Will throw if the encoding is not supported
- *
- */
-function decode (data) {
-  if (data instanceof Uint8Array) {
-    data = decodeText(data)
-  }
-  const prefix = data[0]
-
-  // Make all encodings case-insensitive except the ones that include upper and lower chars in the alphabet
-  if (['f', 'F', 'v', 'V', 't', 'T', 'b', 'B', 'c', 'C', 'h', 'k', 'K'].includes(prefix)) {
-    data = data.toLowerCase()
-  }
-  const enc = encoding(/** @type {BaseCode} */(data[0]))
-  return enc.decode(data.substring(1))
-}
-
-/**
- * Is the given data multibase encoded?
- *
- * @param {Uint8Array|string} data
- * @returns {false | string}
- */
-function isEncoded (data) {
-  if (data instanceof Uint8Array) {
-    data = decodeText(data)
-  }
-
-  // Ensure bufOrString is a string
-  if (Object.prototype.toString.call(data) !== '[object String]') {
-    return false
-  }
-
-  try {
-    const enc = encoding(/** @type {BaseCode} */(data[0]))
-    return enc.name
-  } catch (err) {
-    return false
-  }
-}
-
-/**
- * Validate encoded data
- *
- * @param {BaseNameOrCode} name
- * @param {Uint8Array} buf
- * @returns {void}
- * @throws {Error} Will throw if the encoding is not supported
- */
-function validEncode (name, buf) {
-  const enc = encoding(name)
-  enc.decode(decodeText(buf))
-}
-
-/**
- * Get the encoding by name or code
- *
- * @param {BaseNameOrCode} nameOrCode
- * @returns {Base}
- * @throws {Error} Will throw if the encoding is not supported
- */
-function encoding (nameOrCode) {
-  if (Object.prototype.hasOwnProperty.call(constants.names, /** @type {BaseName} */(nameOrCode))) {
-    return constants.names[/** @type {BaseName} */(nameOrCode)]
-  } else if (Object.prototype.hasOwnProperty.call(constants.codes, /** @type {BaseCode} */(nameOrCode))) {
-    return constants.codes[/** @type {BaseCode} */(nameOrCode)]
-  } else {
-    throw new Error(`Unsupported encoding: ${nameOrCode}`)
-  }
-}
-
-/**
- * Get encoding from data
- *
- * @param {string|Uint8Array} data
- * @returns {Base}
- * @throws {Error} Will throw if the encoding is not supported
- */
-function encodingFromData (data) {
-  if (data instanceof Uint8Array) {
-    data = decodeText(data)
-  }
-
-  return encoding(/** @type {BaseCode} */(data[0]))
-}
-
-exports = module.exports = multibase
-exports.encode = encode
-exports.decode = decode
-exports.isEncoded = isEncoded
-exports.encoding = encoding
-exports.encodingFromData = encodingFromData
-exports.names = Object.freeze(constants.names)
-exports.codes = Object.freeze(constants.codes)
-
-
-/***/ }),
-
-/***/ 8373:
+/***/ 7389:
 /***/ ((module) => {
 
-"use strict";
 
+var N1 = Math.pow(2,  7)
+var N2 = Math.pow(2, 14)
+var N3 = Math.pow(2, 21)
+var N4 = Math.pow(2, 28)
+var N5 = Math.pow(2, 35)
+var N6 = Math.pow(2, 42)
+var N7 = Math.pow(2, 49)
+var N8 = Math.pow(2, 56)
+var N9 = Math.pow(2, 63)
 
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-
-/**
- * @param {string} string
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {Uint8Array}
- */
-const decode = (string, alphabet, bitsPerChar) => {
-  // Build the character lookup table:
-  /** @type {Record<string, number>} */
-  const codes = {}
-  for (let i = 0; i < alphabet.length; ++i) {
-    codes[alphabet[i]] = i
-  }
-
-  // Count the padding bytes:
-  let end = string.length
-  while (string[end - 1] === '=') {
-    --end
-  }
-
-  // Allocate the output:
-  const out = new Uint8Array((end * bitsPerChar / 8) | 0)
-
-  // Parse the data:
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  let written = 0 // Next byte to write
-  for (let i = 0; i < end; ++i) {
-    // Read one character from the string:
-    const value = codes[string[i]]
-    if (value === undefined) {
-      throw new SyntaxError('Invalid character ' + string[i])
-    }
-
-    // Append the bits to the buffer:
-    buffer = (buffer << bitsPerChar) | value
-    bits += bitsPerChar
-
-    // Write out some bits if the buffer has a byte's worth:
-    if (bits >= 8) {
-      bits -= 8
-      out[written++] = 0xff & (buffer >> bits)
-    }
-  }
-
-  // Verify that we have received just enough bits:
-  if (bits >= bitsPerChar || 0xff & (buffer << (8 - bits))) {
-    throw new SyntaxError('Unexpected end of data')
-  }
-
-  return out
+module.exports = function (value) {
+  return (
+    value < N1 ? 1
+  : value < N2 ? 2
+  : value < N3 ? 3
+  : value < N4 ? 4
+  : value < N5 ? 5
+  : value < N6 ? 6
+  : value < N7 ? 7
+  : value < N8 ? 8
+  : value < N9 ? 9
+  :              10
+  )
 }
-
-/**
- * @param {Uint8Array} data
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {string}
- */
-const encode = (data, alphabet, bitsPerChar) => {
-  const pad = alphabet[alphabet.length - 1] === '='
-  const mask = (1 << bitsPerChar) - 1
-  let out = ''
-
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  for (let i = 0; i < data.length; ++i) {
-    // Slurp data into the buffer:
-    buffer = (buffer << 8) | data[i]
-    bits += 8
-
-    // Write out as much as we can:
-    while (bits > bitsPerChar) {
-      bits -= bitsPerChar
-      out += alphabet[mask & (buffer >> bits)]
-    }
-  }
-
-  // Partial character:
-  if (bits) {
-    out += alphabet[mask & (buffer << (bitsPerChar - bits))]
-  }
-
-  // Add padding characters until we hit a byte boundary:
-  if (pad) {
-    while ((out.length * bitsPerChar) & 7) {
-      out += '='
-    }
-  }
-
-  return out
-}
-
-/**
- * RFC4648 Factory
- *
- * @param {number} bitsPerChar
- * @returns {CodecFactory}
- */
-const rfc4648 = (bitsPerChar) => (alphabet) => {
-  return {
-    /**
-     * @param {Uint8Array} input
-     * @returns {string}
-     */
-    encode (input) {
-      return encode(input, alphabet, bitsPerChar)
-    },
-    /**
-     * @param {string} input
-     * @returns {Uint8Array}
-     */
-    decode (input) {
-      return decode(input, alphabet, bitsPerChar)
-    }
-  }
-}
-
-module.exports = { rfc4648 }
-
-
-/***/ }),
-
-/***/ 61:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-// @ts-ignore
-const { TextEncoder, TextDecoder } = __nccwpck_require__(2287)
-
-const textDecoder = new TextDecoder()
-/**
- * @param {ArrayBufferView|ArrayBuffer} bytes
- * @returns {string}
- */
-const decodeText = (bytes) => textDecoder.decode(bytes)
-
-const textEncoder = new TextEncoder()
-/**
- * @param {string} text
- * @returns {Uint8Array}
- */
-const encodeText = (text) => textEncoder.encode(text)
-
-/**
- * Returns a new Uint8Array created by concatenating the passed Arrays
- *
- * @param {Array<ArrayLike<number>>} arrs
- * @param {number} length
- * @returns {Uint8Array}
- */
-function concat (arrs, length) {
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrs) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = { decodeText, encodeText, concat }
-
-
-/***/ }),
-
-/***/ 9477:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Returns a new Uint8Array created by concatenating the passed ArrayLikes
- *
- * @param {Array<ArrayLike<number>>} arrays
- * @param {Number} length
- * @returns {Uint8Array}
- */
-function concat (arrays, length) {
-  if (!length) {
-    length = arrays.reduce((acc, curr) => acc + curr.length, 0)
-  }
-
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrays) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = concat
-
-
-/***/ }),
-
-/***/ 824:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Returns true if the two passed Uint8Arrays have the same content
- *
- * @param {Uint8Array} a
- * @param {Uint8Array} b
- * @returns {boolean}
- */
-function equals (a, b) {
-  if (a === b) {
-    return true
-  }
-
-  if (a.byteLength !== b.byteLength) {
-    return false
-  }
-
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) {
-      return false
-    }
-  }
-
-  return true
-}
-
-module.exports = equals
-
-
-/***/ }),
-
-/***/ 9457:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(8301)
-const { TextEncoder } = __nccwpck_require__(2287)
-const utf8Encoder = new TextEncoder()
-
-/**
- * Interperets each character in a string as a byte and
- * returns a Uint8Array of those bytes.
- *
- * @param {String} string The string to turn into an array
- * @returns {Uint8Array}
- */
-function asciiStringToUint8Array (string) {
-  const array = new Uint8Array(string.length)
-
-  for (let i = 0; i < string.length; i++) {
-    array[i] = string.charCodeAt(i)
-  }
-
-  return array
-}
-
-/**
- * Create a `Uint8Array` from the passed string
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {String} string
- * @param {String} [encoding=utf8] utf8, base16, base64, base64urlpad, etc
- * @returns {Uint8Array}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function fromString (string, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Encoder.encode(string)
-  }
-
-  if (encoding === 'ascii') {
-    return asciiStringToUint8Array(string)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.decode(string)
-}
-
-module.exports = fromString
-
-
-/***/ }),
-
-/***/ 5140:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(8301)
-const { TextDecoder } = __nccwpck_require__(2287)
-const utf8Decoder = new TextDecoder('utf8')
-
-/**
- * Turns a Uint8Array of bytes into a string with each
- * character being the char code of the corresponding byte
- *
- * @param {Uint8Array} array The array to turn into a string
- * @returns {String}
- */
-function uint8ArrayToAsciiString (array) {
-  let string = ''
-
-  for (let i = 0; i < array.length; i++) {
-    string += String.fromCharCode(array[i])
-  }
-  return string
-}
-
-/**
- * Turns a `Uint8Array` into a string.
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {Uint8Array} array The array to turn into a string
- * @param {String} [encoding=utf8] The encoding to use
- * @returns {String}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function toString (array, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Decoder.decode(array)
-  }
-
-  if (encoding === 'ascii') {
-    return uint8ArrayToAsciiString(array)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.encode(array)
-}
-
-module.exports = toString
 
 
 /***/ }),
@@ -33656,9 +30804,9 @@ module.exports = toString
 
 const convert = __nccwpck_require__(7056)
 const protocols = __nccwpck_require__(9067)
-const varint = __nccwpck_require__(8018)
-const uint8ArrayConcat = __nccwpck_require__(9477)
-const uint8ArrayToString = __nccwpck_require__(5140)
+const varint = __nccwpck_require__(2981)
+const uint8ArrayConcat = __nccwpck_require__(7952)
+const uint8ArrayToString = __nccwpck_require__(757)
 
 // export codec
 module.exports = {
@@ -33687,6 +30835,9 @@ module.exports = {
 }
 
 // string -> [[str name, str addr]... ]
+/**
+ * @param {string} str
+ */
 function stringToStringTuples (str) {
   const tuples = []
   const parts = str.split('/').slice(1) // skip first empty elem
@@ -33727,22 +30878,31 @@ function stringToStringTuples (str) {
 }
 
 // [[str name, str addr]... ] -> string
+/**
+ * @param {[number, string?][]} tuples
+ */
 function stringTuplesToString (tuples) {
+  /** @type {Array<string | undefined>} */
   const parts = []
-  tuples.map(tup => {
+  tuples.map((tup) => {
     const proto = protoFromTuple(tup)
     parts.push(proto.name)
     if (tup.length > 1) {
       parts.push(tup[1])
     }
+    return null
   })
 
   return cleanPath(parts.join('/'))
 }
 
 // [[str name, str addr]... ] -> [[int code, Uint8Array]... ]
+/**
+ * @param {Array<string[] | string >} tuples
+ * @returns {[number , Uint8Array?][]}
+ */
 function stringTuplesToTuples (tuples) {
-  return tuples.map(tup => {
+  return tuples.map((tup) => {
     if (!Array.isArray(tup)) {
       tup = [tup]
     }
@@ -33754,11 +30914,19 @@ function stringTuplesToTuples (tuples) {
   })
 }
 
-// [[int code, Uint8Array]... ] -> [[str name, str addr]... ]
+/**
+ * Convert tuples to string tuples
+ *
+ * [[int code, Uint8Array]... ] -> [[int code, str addr]... ]
+ *
+ * @param {Array<[number, Uint8Array?]>} tuples
+ * @returns {Array<[number, string?]>}
+ */
+
 function tuplesToStringTuples (tuples) {
   return tuples.map(tup => {
     const proto = protoFromTuple(tup)
-    if (tup.length > 1) {
+    if (tup[1]) {
       return [proto.code, convert.toString(proto.code, tup[1])]
     }
     return [proto.code]
@@ -33766,8 +30934,11 @@ function tuplesToStringTuples (tuples) {
 }
 
 // [[int code, Uint8Array ]... ] -> Uint8Array
+/**
+ * @param {[number, Uint8Array?][]} tuples
+ */
 function tuplesToBytes (tuples) {
-  return fromBytes(uint8ArrayConcat(tuples.map(tup => {
+  return fromBytes(uint8ArrayConcat(tuples.map((/** @type {any[]} */ tup) => {
     const proto = protoFromTuple(tup)
     let buf = Uint8Array.from(varint.encode(proto.code))
 
@@ -33779,6 +30950,10 @@ function tuplesToBytes (tuples) {
   })))
 }
 
+/**
+ * @param {import("./types").Protocol} p
+ * @param {Uint8Array | number[]} addr
+ */
 function sizeForAddr (p, addr) {
   if (p.size > 0) {
     return p.size / 8
@@ -33790,8 +30965,13 @@ function sizeForAddr (p, addr) {
   }
 }
 
-// Uint8Array -> [[int code, Uint8Array ]... ]
+/**
+ *
+ * @param {Uint8Array} buf
+ * @returns {Array<[number, Uint8Array?]>}
+ */
 function bytesToTuples (buf) {
+  /** @type {Array<[number, Uint8Array?]>} */
   const tuples = []
   let i = 0
   while (i < buf.length) {
@@ -33824,6 +31004,9 @@ function bytesToTuples (buf) {
 }
 
 // Uint8Array -> String
+/**
+ * @param {Uint8Array} buf
+ */
 function bytesToString (buf) {
   const a = bytesToTuples(buf)
   const b = tuplesToStringTuples(a)
@@ -33831,6 +31014,9 @@ function bytesToString (buf) {
 }
 
 // String -> Uint8Array
+/**
+ * @param {string} str
+ */
 function stringToBytes (str) {
   str = cleanPath(str)
   const a = stringToStringTuples(str)
@@ -33840,17 +31026,26 @@ function stringToBytes (str) {
 }
 
 // String -> Uint8Array
+/**
+ * @param {string} str
+ */
 function fromString (str) {
   return stringToBytes(str)
 }
 
 // Uint8Array -> Uint8Array
+/**
+ * @param {Uint8Array} buf
+ */
 function fromBytes (buf) {
   const err = validateBytes(buf)
   if (err) throw err
   return Uint8Array.from(buf) // copy
 }
 
+/**
+ * @param {Uint8Array} buf
+ */
 function validateBytes (buf) {
   try {
     bytesToTuples(buf) // try to parse. will throw if breaks
@@ -33859,18 +31054,30 @@ function validateBytes (buf) {
   }
 }
 
+/**
+ * @param {Uint8Array} buf
+ */
 function isValidBytes (buf) {
   return validateBytes(buf) === undefined
 }
 
+/**
+ * @param {string} str
+ */
 function cleanPath (str) {
-  return '/' + str.trim().split('/').filter(a => a).join('/')
+  return '/' + str.trim().split('/').filter((/** @type {any} */ a) => a).join('/')
 }
 
+/**
+ * @param {string} str
+ */
 function ParseError (str) {
   return new Error('Error parsing address: ' + str)
 }
 
+/**
+ * @param {any[]} tup
+ */
 function protoFromTuple (tup) {
   const proto = protocols(tup[0])
   return proto
@@ -33888,15 +31095,19 @@ function protoFromTuple (tup) {
 const ip = __nccwpck_require__(9512)
 const protocols = __nccwpck_require__(9067)
 const CID = __nccwpck_require__(9016)
-const multibase = __nccwpck_require__(6487)
-const varint = __nccwpck_require__(8018)
-const uint8ArrayToString = __nccwpck_require__(5140)
-const uint8ArrayFromString = __nccwpck_require__(9457)
-const uint8ArrayConcat = __nccwpck_require__(9477)
+const multibase = __nccwpck_require__(8959)
+const varint = __nccwpck_require__(2981)
+const uint8ArrayToString = __nccwpck_require__(757)
+const uint8ArrayFromString = __nccwpck_require__(828)
+const uint8ArrayConcat = __nccwpck_require__(7952)
 
 module.exports = Convert
 
 // converts (serializes) addresses
+/**
+ * @param {string} proto
+ * @param {string | Uint8Array} a
+ */
 function Convert (proto, a) {
   if (a instanceof Uint8Array) {
     return Convert.toString(proto, a)
@@ -33905,9 +31116,16 @@ function Convert (proto, a) {
   }
 }
 
+/**
+ * Convert [code,Uint8Array] to string
+ *
+ * @param {number|string} proto
+ * @param {Uint8Array} buf
+ * @returns {string}
+ */
 Convert.toString = function convertToString (proto, buf) {
-  proto = protocols(proto)
-  switch (proto.code) {
+  const protocol = protocols(proto)
+  switch (protocol.code) {
     case 4: // ipv4
     case 41: // ipv6
       return bytes2ip(buf)
@@ -33916,7 +31134,7 @@ Convert.toString = function convertToString (proto, buf) {
     case 273: // udp
     case 33: // dccp
     case 132: // sctp
-      return bytes2port(buf)
+      return bytes2port(buf).toString()
 
     case 53: // dns
     case 54: // dns4
@@ -33937,9 +31155,9 @@ Convert.toString = function convertToString (proto, buf) {
   }
 }
 
-Convert.toBytes = function convertToBytes (proto, str) {
-  proto = protocols(proto)
-  switch (proto.code) {
+Convert.toBytes = function convertToBytes (/** @type {string | number } */ proto, /** @type {string} */ str) {
+  const protocol = protocols(proto)
+  switch (protocol.code) {
     case 4: // ipv4
       return ip2bytes(str)
     case 41: // ipv6
@@ -33970,6 +31188,9 @@ Convert.toBytes = function convertToBytes (proto, str) {
   }
 }
 
+/**
+ * @param {string} ipString
+ */
 function ip2bytes (ipString) {
   if (!ip.isIP(ipString)) {
     throw new Error('invalid ip address')
@@ -33977,6 +31198,9 @@ function ip2bytes (ipString) {
   return ip.toBytes(ipString)
 }
 
+/**
+ * @param {Uint8Array} ipBuff
+ */
 function bytes2ip (ipBuff) {
   const ipString = ip.toString(ipBuff)
   if (!ipString || !ip.isIP(ipString)) {
@@ -33985,6 +31209,9 @@ function bytes2ip (ipBuff) {
   return ipString
 }
 
+/**
+ * @param {number} port
+ */
 function port2bytes (port) {
   const buf = new ArrayBuffer(2)
   const view = new DataView(buf)
@@ -33993,17 +31220,26 @@ function port2bytes (port) {
   return new Uint8Array(buf)
 }
 
+/**
+ * @param {Uint8Array} buf
+ */
 function bytes2port (buf) {
   const view = new DataView(buf.buffer)
-  return view.getUint16(0)
+  return view.getUint16(buf.byteOffset)
 }
 
+/**
+ * @param {string} str
+ */
 function str2bytes (str) {
   const buf = uint8ArrayFromString(str)
   const size = Uint8Array.from(varint.encode(buf.length))
   return uint8ArrayConcat([size, buf], size.length + buf.length)
 }
 
+/**
+ * @param {Uint8Array} buf
+ */
 function bytes2str (buf) {
   const size = varint.decode(buf)
   buf = buf.slice(varint.decode.bytes)
@@ -34015,6 +31251,9 @@ function bytes2str (buf) {
   return uint8ArrayToString(buf)
 }
 
+/**
+ * @param {string | Uint8Array | CID} hash
+ */
 function mh2bytes (hash) {
   // the address is a varint prefixed multihash string representation
   const mh = new CID(hash).multihash
@@ -34022,6 +31261,12 @@ function mh2bytes (hash) {
   return uint8ArrayConcat([size, mh], size.length + mh.length)
 }
 
+/**
+ * Converts bytes to bas58btc string
+ *
+ * @param {Uint8Array} buf
+ * @returns {string} bas58btc string
+ */
 function bytes2mh (buf) {
   const size = varint.decode(buf)
   const address = buf.slice(varint.decode.bytes)
@@ -34033,6 +31278,9 @@ function bytes2mh (buf) {
   return uint8ArrayToString(address, 'base58btc')
 }
 
+/**
+ * @param {string} str
+ */
 function onion2bytes (str) {
   const addr = str.split(':')
   if (addr.length !== 2) {
@@ -34054,6 +31302,9 @@ function onion2bytes (str) {
   return uint8ArrayConcat([buf, portBuf], buf.length + portBuf.length)
 }
 
+/**
+ * @param {string} str
+ */
 function onion32bytes (str) {
   const addr = str.split(':')
   if (addr.length !== 2) {
@@ -34074,6 +31325,9 @@ function onion32bytes (str) {
   return uint8ArrayConcat([buf, portBuf], buf.length + portBuf.length)
 }
 
+/**
+ * @param {Uint8Array} buf
+ */
 function bytes2onion (buf) {
   const addrBytes = buf.slice(0, buf.length - 2)
   const portBytes = buf.slice(buf.length - 2)
@@ -34086,516 +31340,599 @@ function bytes2onion (buf) {
 /***/ }),
 
 /***/ 5858:
-/***/ ((module, exports, __nccwpck_require__) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
 
 const codec = __nccwpck_require__(4160)
 const protocols = __nccwpck_require__(9067)
-const varint = __nccwpck_require__(8018)
+const varint = __nccwpck_require__(2981)
 const CID = __nccwpck_require__(9016)
-const withIs = __nccwpck_require__(4642)
 const errCode = __nccwpck_require__(2997)
 const inspect = Symbol.for('nodejs.util.inspect.custom')
-const uint8ArrayToString = __nccwpck_require__(5140)
-const uint8ArrayEquals = __nccwpck_require__(824)
+const uint8ArrayToString = __nccwpck_require__(757)
+const uint8ArrayEquals = __nccwpck_require__(333)
 
+/**
+ * @typedef {(addr: Multiaddr) => Promise<string[]>} Resolver
+ * @typedef {string | Multiaddr | Uint8Array | null} MultiaddrInput
+ * @typedef {import('./types').MultiaddrObject} MultiaddrObject
+ * @typedef {import('./types').Protocol} Protocol
+ */
+
+/** @type {Map<string, Resolver>} */
 const resolvers = new Map()
+const symbol = Symbol.for('@multiformats/js-multiaddr/multiaddr')
 
 /**
  * Creates a [multiaddr](https://github.com/multiformats/multiaddr) from
  * a Uint8Array, String or another Multiaddr instance
  * public key.
  *
- * @class Multiaddr
- * @param {(string | Uint8Array | Multiaddr)} addr - If String or Uint8Array, needs to adhere
- * to the address format of a [multiaddr](https://github.com/multiformats/multiaddr#string-format)
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
  */
-const Multiaddr = withIs.proto(function (addr) {
-  if (!(this instanceof Multiaddr)) {
-    return new Multiaddr(addr)
-  }
-
-  // default
-  if (addr == null) {
-    addr = ''
-  }
-
-  if (addr instanceof Uint8Array) {
-    /**
-     * @type {Uint8Array} - The raw bytes representing this multiaddress
-     */
-    this.bytes = codec.fromBytes(addr)
-  } else if (typeof addr === 'string' || addr instanceof String) {
-    if (addr.length > 0 && addr.charAt(0) !== '/') {
-      throw new Error(`multiaddr "${addr}" must start with a "/"`)
+class Multiaddr {
+  /**
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   * ```
+   *
+   * @param {MultiaddrInput} [addr] - If String or Uint8Array, needs to adhere to the address format of a [multiaddr](https://github.com/multiformats/multiaddr#string-format)
+   */
+  constructor (addr) {
+    // default
+    if (addr == null) {
+      addr = ''
     }
-    this.bytes = codec.fromString(addr)
-  } else if (addr.bytes && addr.protos && addr.protoCodes) { // Multiaddr
-    this.bytes = codec.fromBytes(addr.bytes) // validate + copy buffer
-  } else {
-    throw new Error('addr must be a string, Buffer, or another Multiaddr')
-  }
-}, { className: 'Multiaddr', symbolName: '@multiformats/js-multiaddr/multiaddr' })
 
-/**
- * Returns Multiaddr as a String
- *
- * @returns {string}
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').toString()
- * // '/ip4/127.0.0.1/tcp/4001'
- */
-Multiaddr.prototype.toString = function toString () {
-  return codec.bytesToString(this.bytes)
-}
+    // Define symbol
+    Object.defineProperty(this, symbol, { value: true })
 
-/**
- * Returns Multiaddr as a JSON encoded object
- *
- * @returns {string}
- * @example
- * JSON.stringify(Multiaddr('/ip4/127.0.0.1/tcp/4001'))
- * // '/ip4/127.0.0.1/tcp/4001'
- */
-Multiaddr.prototype.toJSON = Multiaddr.prototype.toString
-
-/**
- * Returns Multiaddr as a convinient options object to be used with net.createConnection
- *
- * @returns {{family: string, host: string, transport: string, port: number}}
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').toOptions()
- * // { family: 'ipv4', host: '127.0.0.1', transport: 'tcp', port: 4001 }
- */
-Multiaddr.prototype.toOptions = function toOptions () {
-  const opts = {}
-  const parsed = this.toString().split('/')
-  opts.family = parsed[1] === 'ip4' ? 'ipv4' : 'ipv6'
-  opts.host = parsed[2]
-  opts.transport = parsed[3]
-  opts.port = parseInt(parsed[4])
-  return opts
-}
-
-/**
- * Returns Multiaddr as a human-readable string.
- * For post Node.js v10.0.0.
- * https://nodejs.org/api/deprecations.html#deprecations_dep0079_custom_inspection_function_on_objects_via_inspect
- *
- * @returns {string}
- * @example
- * console.log(Multiaddr('/ip4/127.0.0.1/tcp/4001'))
- * // '<Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>'
- */
-Multiaddr.prototype[inspect] = function inspectCustom () {
-  return '<Multiaddr ' +
-    uint8ArrayToString(this.bytes, 'base16') + ' - ' +
-    codec.bytesToString(this.bytes) + '>'
-}
-
-/**
- * Returns Multiaddr as a human-readable string.
- * Fallback for pre Node.js v10.0.0.
- * https://nodejs.org/api/deprecations.html#deprecations_dep0079_custom_inspection_function_on_objects_via_inspect
- *
- * @returns {string}
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').inspect()
- * // '<Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>'
- */
-Multiaddr.prototype.inspect = function inspect () {
-  return '<Multiaddr ' +
-    uint8ArrayToString(this.bytes, 'base16') + ' - ' +
-    codec.bytesToString(this.bytes) + '>'
-}
-
-/**
- * @typedef {object} protocol
- * @property {number} code
- * @property {number} size
- * @property {string} name
- * @property {boolean} [resolvable]
- * @property {boolean} [path]
- */
-
-/**
- * Returns the protocols the Multiaddr is defined with, as an array of objects, in
- * left-to-right order. Each object contains the protocol code, protocol name,
- * and the size of its address space in bits.
- * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
- *
- * @returns {protocol[]} protocols - All the protocols the address is composed of
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').protos()
- * // [ { code: 4, size: 32, name: 'ip4' },
- * //   { code: 6, size: 16, name: 'tcp' } ]
- */
-Multiaddr.prototype.protos = function protos () {
-  return this.protoCodes().map(code => Object.assign({}, protocols(code)))
-}
-
-/**
- * Returns the codes of the protocols in left-to-right order.
- * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
- *
- * @returns {Array<number>} protocol codes
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').protoCodes()
- * // [ 4, 6 ]
- */
-Multiaddr.prototype.protoCodes = function protoCodes () {
-  const codes = []
-  const buf = this.bytes
-  let i = 0
-  while (i < buf.length) {
-    const code = varint.decode(buf, i)
-    const n = varint.decode.bytes
-
-    const p = protocols(code)
-    const size = codec.sizeForAddr(p, buf.slice(i + n))
-
-    i += (size + n)
-    codes.push(code)
-  }
-
-  return codes
-}
-
-/**
- * Returns the names of the protocols in left-to-right order.
- * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
- *
- * @returns {Array.<string>} protocol names
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').protoNames()
- * // [ 'ip4', 'tcp' ]
- */
-Multiaddr.prototype.protoNames = function protoNames () {
-  return this.protos().map(proto => proto.name)
-}
-
-/**
- * Returns a tuple of parts
- *
- * @returns {[number, Uint8Array][]} tuples
- * @example
- * Multiaddr("/ip4/127.0.0.1/tcp/4001").tuples()
- * // [ [ 4, <Buffer 7f 00 00 01> ], [ 6, <Buffer 0f a1> ] ]
- */
-Multiaddr.prototype.tuples = function tuples () {
-  return codec.bytesToTuples(this.bytes)
-}
-
-/**
- * Returns a tuple of string/number parts
- * - tuples[][0] = code of protocol
- * - tuples[][1] = contents of address
- *
- * @returns {[number, string|number][]} tuples
- * @example
- * Multiaddr("/ip4/127.0.0.1/tcp/4001").stringTuples()
- * // [ [ 4, '127.0.0.1' ], [ 6, 4001 ] ]
- */
-Multiaddr.prototype.stringTuples = function stringTuples () {
-  const t = codec.bytesToTuples(this.bytes)
-  return codec.tuplesToStringTuples(t)
-}
-
-/**
- * Encapsulates a Multiaddr in another Multiaddr
- *
- * @param {Multiaddr} addr - Multiaddr to add into this Multiaddr
- * @returns {Multiaddr}
- * @example
- * const mh1 = Multiaddr('/ip4/8.8.8.8/tcp/1080')
- * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
- *
- * const mh2 = Multiaddr('/ip4/127.0.0.1/tcp/4001')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
- *
- * const mh3 = mh1.encapsulate(mh2)
- * // <Multiaddr 0408080808060438047f000001060fa1 - /ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001>
- *
- * mh3.toString()
- * // '/ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001'
- */
-Multiaddr.prototype.encapsulate = function encapsulate (addr) {
-  addr = Multiaddr(addr)
-  return Multiaddr(this.toString() + addr.toString())
-}
-
-/**
- * Decapsulates a Multiaddr from another Multiaddr
- *
- * @param {Multiaddr} addr - Multiaddr to remove from this Multiaddr
- * @returns {Multiaddr}
- * @example
- * const mh1 = Multiaddr('/ip4/8.8.8.8/tcp/1080')
- * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
- *
- * const mh2 = Multiaddr('/ip4/127.0.0.1/tcp/4001')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
- *
- * const mh3 = mh1.encapsulate(mh2)
- * // <Multiaddr 0408080808060438047f000001060fa1 - /ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001>
- *
- * mh3.decapsulate(mh2).toString()
- * // '/ip4/8.8.8.8/tcp/1080'
- */
-Multiaddr.prototype.decapsulate = function decapsulate (addr) {
-  addr = addr.toString()
-  const s = this.toString()
-  const i = s.lastIndexOf(addr)
-  if (i < 0) {
-    throw new Error('Address ' + this + ' does not contain subaddress: ' + addr)
-  }
-  return Multiaddr(s.slice(0, i))
-}
-
-/**
- * A more reliable version of `decapsulate` if you are targeting a
- * specific code, such as 421 (the `p2p` protocol code). The last index of the code
- * will be removed from the `Multiaddr`, and a new instance will be returned.
- * If the code is not present, the original `Multiaddr` is returned.
- *
- * @param {number} code - The code of the protocol to decapsulate from this Multiaddr
- * @returns {Multiaddr}
- * @example
- * const addr = Multiaddr('/ip4/0.0.0.0/tcp/8080/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC')
- * // <Multiaddr 0400... - /ip4/0.0.0.0/tcp/8080/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC>
- *
- * addr.decapsulateCode(421).toString()
- * // '/ip4/0.0.0.0/tcp/8080'
- *
- * Multiaddr('/ip4/127.0.0.1/tcp/8080').decapsulateCode(421).toString()
- * // '/ip4/127.0.0.1/tcp/8080'
- */
-Multiaddr.prototype.decapsulateCode = function decapsulateCode (code) {
-  const tuples = this.tuples()
-  for (let i = tuples.length - 1; i >= 0; i--) {
-    if (tuples[i][0] === code) {
-      return Multiaddr(codec.tuplesToBytes(tuples.slice(0, i)))
+    if (addr instanceof Uint8Array) {
+      /** @type {Uint8Array} - The raw bytes representing this multiaddress */
+      this.bytes = codec.fromBytes(addr)
+    } else if (typeof addr === 'string') {
+      if (addr.length > 0 && addr.charAt(0) !== '/') {
+        throw new Error(`multiaddr "${addr}" must start with a "/"`)
+      }
+      this.bytes = codec.fromString(addr)
+    } else if (Multiaddr.isMultiaddr(addr)) { // Multiaddr
+      this.bytes = codec.fromBytes(addr.bytes) // validate + copy buffer
+    } else {
+      throw new Error('addr must be a string, Buffer, or another Multiaddr')
     }
   }
-  return this
-}
 
-/**
- * Extract the peerId if the multiaddr contains one
- *
- * @returns {string | null} peerId - The id of the peer or null if invalid or missing from the ma
- * @example
- * const mh1 = Multiaddr('/ip4/8.8.8.8/tcp/1080/ipfs/QmValidBase58string')
- * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080/ipfs/QmValidBase58string>
- *
- * // should return QmValidBase58string or null if the id is missing or invalid
- * const peerId = mh1.getPeerId()
- */
-Multiaddr.prototype.getPeerId = function getPeerId () {
-  let b58str = null
-  try {
-    const tuples = this.stringTuples().filter((tuple) => {
-      if (tuple[0] === protocols.names.ipfs.code) {
-        return true
+  /**
+   * Returns Multiaddr as a String
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').toString()
+   * // '/ip4/127.0.0.1/tcp/4001'
+   * ```
+   */
+  toString () {
+    return codec.bytesToString(this.bytes)
+  }
+
+  /**
+   * Returns Multiaddr as a JSON encoded object
+   *
+   * @example
+   * ```js
+   * JSON.stringify(new Multiaddr('/ip4/127.0.0.1/tcp/4001'))
+   * // '/ip4/127.0.0.1/tcp/4001'
+   * ```
+   */
+  toJSON () {
+    return this.toString()
+  }
+
+  /**
+   * Returns Multiaddr as a convinient options object to be used with net.createConnection
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').toOptions()
+   * // { family: 4, host: '127.0.0.1', transport: 'tcp', port: 4001 }
+   * ```
+   */
+  toOptions () {
+    /** @type {MultiaddrObject} */
+    const opts = {}
+    const parsed = this.toString().split('/')
+    opts.family = parsed[1] === 'ip4' ? 4 : 6
+    opts.host = parsed[2]
+    opts.transport = parsed[3]
+    opts.port = parseInt(parsed[4])
+    return opts
+  }
+
+  /**
+   * Returns the protocols the Multiaddr is defined with, as an array of objects, in
+   * left-to-right order. Each object contains the protocol code, protocol name,
+   * and the size of its address space in bits.
+   * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').protos()
+   * // [ { code: 4, size: 32, name: 'ip4' },
+   * //   { code: 6, size: 16, name: 'tcp' } ]
+   * ```
+   *
+   * @returns {Protocol[]} protocols - All the protocols the address is composed of
+   */
+  protos () {
+    return this.protoCodes().map(code => Object.assign({}, protocols(code)))
+  }
+
+  /**
+   * Returns the codes of the protocols in left-to-right order.
+   * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
+   *
+   * @example
+   * ```js
+   * Multiaddr('/ip4/127.0.0.1/tcp/4001').protoCodes()
+   * // [ 4, 6 ]
+   * ```
+   *
+   * @returns {number[]} protocol codes
+   */
+  protoCodes () {
+    const codes = []
+    const buf = this.bytes
+    let i = 0
+    while (i < buf.length) {
+      const code = varint.decode(buf, i)
+      const n = varint.decode.bytes
+
+      const p = protocols(code)
+      const size = codec.sizeForAddr(p, buf.slice(i + n))
+
+      i += (size + n)
+      codes.push(code)
+    }
+
+    return codes
+  }
+
+  /**
+   * Returns the names of the protocols in left-to-right order.
+   * [See list of protocols](https://github.com/multiformats/multiaddr/blob/master/protocols.csv)
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').protoNames()
+   * // [ 'ip4', 'tcp' ]
+   * ```
+   *
+   * @returns {string[]} protocol names
+   */
+  protoNames () {
+    return this.protos().map(proto => proto.name)
+  }
+
+  /**
+   * Returns a tuple of parts
+   *
+   * @example
+   * ```js
+   * new Multiaddr("/ip4/127.0.0.1/tcp/4001").tuples()
+   * // [ [ 4, <Buffer 7f 00 00 01> ], [ 6, <Buffer 0f a1> ] ]
+   * ```
+   */
+  tuples () {
+    return codec.bytesToTuples(this.bytes)
+  }
+
+  /**
+   * Returns a tuple of string/number parts
+   * - tuples[][0] = code of protocol
+   * - tuples[][1] = contents of address
+   *
+   * @example
+   * ```js
+   * new Multiaddr("/ip4/127.0.0.1/tcp/4001").stringTuples()
+   * // [ [ 4, '127.0.0.1' ], [ 6, '4001' ] ]
+   * ```
+   */
+  stringTuples () {
+    const t = codec.bytesToTuples(this.bytes)
+    return codec.tuplesToStringTuples(t)
+  }
+
+  /**
+   * Encapsulates a Multiaddr in another Multiaddr
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/8.8.8.8/tcp/1080')
+   * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
+   *
+   * const mh2 = new Multiaddr('/ip4/127.0.0.1/tcp/4001')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   *
+   * const mh3 = mh1.encapsulate(mh2)
+   * // <Multiaddr 0408080808060438047f000001060fa1 - /ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001>
+   *
+   * mh3.toString()
+   * // '/ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001'
+   * ```
+   *
+   * @param {MultiaddrInput} addr - Multiaddr to add into this Multiaddr
+   */
+  encapsulate (addr) {
+    addr = new Multiaddr(addr)
+    return new Multiaddr(this.toString() + addr.toString())
+  }
+
+  /**
+   * Decapsulates a Multiaddr from another Multiaddr
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/8.8.8.8/tcp/1080')
+   * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
+   *
+   * const mh2 = new Multiaddr('/ip4/127.0.0.1/tcp/4001')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   *
+   * const mh3 = mh1.encapsulate(mh2)
+   * // <Multiaddr 0408080808060438047f000001060fa1 - /ip4/8.8.8.8/tcp/1080/ip4/127.0.0.1/tcp/4001>
+   *
+   * mh3.decapsulate(mh2).toString()
+   * // '/ip4/8.8.8.8/tcp/1080'
+   * ```
+   *
+   * @param {Multiaddr | string} addr - Multiaddr to remove from this Multiaddr
+   * @returns {Multiaddr}
+   */
+  decapsulate (addr) {
+    const addrString = addr.toString()
+    const s = this.toString()
+    const i = s.lastIndexOf(addrString)
+    if (i < 0) {
+      throw new Error('Address ' + this + ' does not contain subaddress: ' + addr)
+    }
+    return new Multiaddr(s.slice(0, i))
+  }
+
+  /**
+   * A more reliable version of `decapsulate` if you are targeting a
+   * specific code, such as 421 (the `p2p` protocol code). The last index of the code
+   * will be removed from the `Multiaddr`, and a new instance will be returned.
+   * If the code is not present, the original `Multiaddr` is returned.
+   *
+   * @example
+   * ```js
+   * const addr = new Multiaddr('/ip4/0.0.0.0/tcp/8080/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC')
+   * // <Multiaddr 0400... - /ip4/0.0.0.0/tcp/8080/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC>
+   *
+   * addr.decapsulateCode(421).toString()
+   * // '/ip4/0.0.0.0/tcp/8080'
+   *
+   * new Multiaddr('/ip4/127.0.0.1/tcp/8080').decapsulateCode(421).toString()
+   * // '/ip4/127.0.0.1/tcp/8080'
+   * ```
+   *
+   * @param {number} code - The code of the protocol to decapsulate from this Multiaddr
+   * @returns {Multiaddr}
+   */
+  decapsulateCode (code) {
+    const tuples = this.tuples()
+    for (let i = tuples.length - 1; i >= 0; i--) {
+      if (tuples[i][0] === code) {
+        return new Multiaddr(codec.tuplesToBytes(tuples.slice(0, i)))
       }
-    })
-
-    // Get the last id
-    b58str = tuples.pop()[1]
-    // Get multihash, unwrap from CID if needed
-    b58str = uint8ArrayToString(new CID(b58str).multihash, 'base58btc')
-  } catch (e) {
-    b58str = null
+    }
+    return this
   }
 
-  return b58str
-}
+  /**
+   * Extract the peerId if the multiaddr contains one
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/8.8.8.8/tcp/1080/ipfs/QmValidBase58string')
+   * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080/ipfs/QmValidBase58string>
+   *
+   * // should return QmValidBase58string or null if the id is missing or invalid
+   * const peerId = mh1.getPeerId()
+   * ```
+   *
+   * @returns {string | null} peerId - The id of the peer or null if invalid or missing from the ma
+   */
+  getPeerId () {
+    try {
+      const tuples = this.stringTuples().filter((tuple) => {
+        if (tuple[0] === protocols.names.ipfs.code) {
+          return true
+        }
+        return false
+      })
 
-/**
- * Extract the path if the multiaddr contains one
- *
- * @returns {string | null} path - The path of the multiaddr, or null if no path protocol is present
- * @example
- * const mh1 = Multiaddr('/ip4/8.8.8.8/tcp/1080/unix/tmp/p2p.sock')
- * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080/unix/tmp/p2p.sock>
- *
- * // should return utf8 string or null if the id is missing or invalid
- * const path = mh1.getPath()
- */
-Multiaddr.prototype.getPath = function getPath () {
-  let path = null
-  try {
-    path = this.stringTuples().filter((tuple) => {
-      const proto = protocols(tuple[0])
-      if (proto.path) {
-        return true
+      // Get the last ipfs tuple ['ipfs', 'peerid string']
+      const tuple = tuples.pop()
+      if (tuple && tuple[1]) {
+        // Get multihash, unwrap from CID if needed
+        return uint8ArrayToString(new CID(tuple[1]).multihash, 'base58btc')
+      } else {
+        return null
       }
-    })[0][1]
-  } catch (e) {
-    path = null
+    } catch (e) {
+      return null
+    }
   }
 
-  return path
-}
+  /**
+   * Extract the path if the multiaddr contains one
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/8.8.8.8/tcp/1080/unix/tmp/p2p.sock')
+   * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080/unix/tmp/p2p.sock>
+   *
+   * // should return utf8 string or null if the id is missing or invalid
+   * const path = mh1.getPath()
+   * ```js
+   *
+   * @returns {string | null} path - The path of the multiaddr, or null if no path protocol is present
+   */
+  getPath () {
+    let path = null
+    try {
+      path = this.stringTuples().filter((tuple) => {
+        const proto = protocols(tuple[0])
+        if (proto.path) {
+          return true
+        }
+        return false
+      })[0][1]
 
-/**
- * Checks if two Multiaddrs are the same
- *
- * @param {Multiaddr} addr
- * @returns {Bool}
- * @example
- * const mh1 = Multiaddr('/ip4/8.8.8.8/tcp/1080')
- * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
- *
- * const mh2 = Multiaddr('/ip4/127.0.0.1/tcp/4001')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
- *
- * mh1.equals(mh1)
- * // true
- *
- * mh1.equals(mh2)
- * // false
- */
-Multiaddr.prototype.equals = function equals (addr) {
-  return uint8ArrayEquals(this.bytes, addr.bytes)
-}
-
-/**
- * Resolve multiaddr if containing resolvable hostname.
- *
- * @returns {Promise<Array<Multiaddr>>}
- * @example
- * Multiaddr.resolvers.set('dnsaddr', resolverFunction)
- * const mh1 = Multiaddr('/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb')
- * const resolvedMultiaddrs = await mh1.resolve()
- * // [
- * //   <Multiaddr 04934b5353060fa1a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>,
- * //   <Multiaddr 04934b53530601bbde03a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/tcp/443/wss/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>,
- * //   <Multiaddr 04934b535391020fa1cc03a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/udp/4001/quic/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>
- * // ]
- */
-Multiaddr.prototype.resolve = async function resolve () {
-  const resolvableProto = this.protos().find((p) => p.resolvable)
-
-  // Multiaddr is not resolvable?
-  if (!resolvableProto) {
-    return [this]
+      if (!path) {
+        path = null
+      }
+    } catch (e) {
+      path = null
+    }
+    return path
   }
 
-  const resolver = resolvers.get(resolvableProto.name)
-  if (!resolver) {
-    throw errCode(new Error(`no available resolver for ${resolvableProto.name}`), 'ERR_NO_AVAILABLE_RESOLVER')
+  /**
+   * Checks if two Multiaddrs are the same
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/8.8.8.8/tcp/1080')
+   * // <Multiaddr 0408080808060438 - /ip4/8.8.8.8/tcp/1080>
+   *
+   * const mh2 = new Multiaddr('/ip4/127.0.0.1/tcp/4001')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   *
+   * mh1.equals(mh1)
+   * // true
+   *
+   * mh1.equals(mh2)
+   * // false
+   * ```
+   *
+   * @param {Multiaddr} addr
+   * @returns {boolean}
+   */
+  equals (addr) {
+    return uint8ArrayEquals(this.bytes, addr.bytes)
   }
 
-  const addresses = await resolver(this)
-  return addresses.map(a => Multiaddr(a))
-}
+  /**
+   * Resolve multiaddr if containing resolvable hostname.
+   *
+   * @example
+   * ```js
+   * Multiaddr.resolvers.set('dnsaddr', resolverFunction)
+   * const mh1 = new Multiaddr('/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb')
+   * const resolvedMultiaddrs = await mh1.resolve()
+   * // [
+   * //   <Multiaddr 04934b5353060fa1a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>,
+   * //   <Multiaddr 04934b53530601bbde03a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/tcp/443/wss/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>,
+   * //   <Multiaddr 04934b535391020fa1cc03a503221220c10f9319dac35c270a6b74cd644cb3acfc1f6efc8c821f8eb282599fd1814f64 - /ip4/147.75.83.83/udp/4001/quic/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb>
+   * // ]
+   * ```
+   *
+   * @returns {Promise<Array<Multiaddr>>}
+   */
+  async resolve () {
+    const resolvableProto = this.protos().find((p) => p.resolvable)
 
-/**
- * Gets a Multiaddrs node-friendly address object. Note that protocol information
- * is left out: in Node (and most network systems) the protocol is unknowable
- * given only the address.
- *
- * Has to be a ThinWaist Address, otherwise throws error
- *
- * @returns {{family: string, address: string, port: number}}
- * @throws {Error} Throws error if Multiaddr is not a Thin Waist address
- * @example
- * Multiaddr('/ip4/127.0.0.1/tcp/4001').nodeAddress()
- * // {family: 'IPv4', address: '127.0.0.1', port: '4001'}
- */
-Multiaddr.prototype.nodeAddress = function nodeAddress () {
-  const codes = this.protoCodes()
-  const names = this.protoNames()
-  const parts = this.toString().split('/').slice(1)
+    // Multiaddr is not resolvable?
+    if (!resolvableProto) {
+      return [this]
+    }
 
-  if (parts.length < 4) {
-    throw new Error('multiaddr must have a valid format: "/{ip4, ip6, dns4, dns6}/{address}/{tcp, udp}/{port}".')
-  } else if (codes[0] !== 4 && codes[0] !== 41 && codes[0] !== 54 && codes[0] !== 55) {
-    throw new Error(`no protocol with name: "'${names[0]}'". Must have a valid family name: "{ip4, ip6, dns4, dns6}".`)
-  } else if (parts[2] !== 'tcp' && parts[2] !== 'udp') {
-    throw new Error(`no protocol with name: "'${names[1]}'". Must have a valid transport protocol: "{tcp, udp}".`)
+    const resolver = resolvers.get(resolvableProto.name)
+    if (!resolver) {
+      throw errCode(new Error(`no available resolver for ${resolvableProto.name}`), 'ERR_NO_AVAILABLE_RESOLVER')
+    }
+
+    const addresses = await resolver(this)
+    return addresses.map((a) => new Multiaddr(a))
   }
 
-  return {
-    family: (codes[0] === 41 || codes[0] === 55) ? 6 : 4,
-    address: parts[1], // ip addr
-    port: parseInt(parts[3]) // tcp or udp port
-  }
-}
+  /**
+   * Gets a Multiaddrs node-friendly address object. Note that protocol information
+   * is left out: in Node (and most network systems) the protocol is unknowable
+   * given only the address.
+   *
+   * Has to be a ThinWaist Address, otherwise throws error
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').nodeAddress()
+   * // {family: 4, address: '127.0.0.1', port: 4001}
+   * ```
+   *
+   * @returns {{family: 4 | 6, address: string, port: number}}
+   * @throws {Error} Throws error if Multiaddr is not a Thin Waist address
+   */
+  nodeAddress () {
+    const codes = this.protoCodes()
+    const names = this.protoNames()
+    const parts = this.toString().split('/').slice(1)
 
-/**
- * Creates a Multiaddr from a node-friendly address object
- *
- * @param {{family: string, address: string, port: number}} addr
- * @param {string} transport
- * @returns {Multiaddr} multiaddr
- * @throws {Error} Throws error if addr is not truthy
- * @throws {Error} Throws error if transport is not truthy
- * @example
- * Multiaddr.fromNodeAddress({address: '127.0.0.1', port: '4001'}, 'tcp')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
- */
-Multiaddr.fromNodeAddress = function fromNodeAddress (addr, transport) {
-  if (!addr) throw new Error('requires node address object')
-  if (!transport) throw new Error('requires transport protocol')
-  let ip
-  switch (addr.family) {
-    case 'IPv4':
-      ip = 'ip4'
-      break
-    case 'IPv6':
-      ip = 'ip6'
-      break
-    default:
-      throw Error(`Invalid addr family. Got '${addr.family}' instead of 'IPv4' or 'IPv6'`)
-  }
-  return Multiaddr('/' + [ip, addr.address, transport, addr.port].join('/'))
-}
+    if (parts.length < 4) {
+      throw new Error('multiaddr must have a valid format: "/{ip4, ip6, dns4, dns6}/{address}/{tcp, udp}/{port}".')
+    } else if (codes[0] !== 4 && codes[0] !== 41 && codes[0] !== 54 && codes[0] !== 55) {
+      throw new Error(`no protocol with name: "'${names[0]}'". Must have a valid family name: "{ip4, ip6, dns4, dns6}".`)
+    } else if (parts[2] !== 'tcp' && parts[2] !== 'udp') {
+      throw new Error(`no protocol with name: "'${names[1]}'". Must have a valid transport protocol: "{tcp, udp}".`)
+    }
 
-// TODO find a better example, not sure about it's good enough
-/**
- * Returns if a Multiaddr is a Thin Waist address or not.
- *
- * Thin Waist is if a Multiaddr adheres to the standard combination of:
- *
- * `{IPv4, IPv6}/{TCP, UDP}`
- *
- * @param {Multiaddr} [addr] - Defaults to using `this` instance
- * @returns {boolean} isThinWaistAddress
- * @example
- * const mh1 = Multiaddr('/ip4/127.0.0.1/tcp/4001')
- * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
- * const mh2 = Multiaddr('/ip4/192.168.2.1/tcp/5001')
- * // <Multiaddr 04c0a80201061389 - /ip4/192.168.2.1/tcp/5001>
- * const mh3 = mh1.encapsulate(mh2)
- * // <Multiaddr 047f000001060fa104c0a80201061389 - /ip4/127.0.0.1/tcp/4001/ip4/192.168.2.1/tcp/5001>
- * mh1.isThinWaistAddress()
- * // true
- * mh2.isThinWaistAddress()
- * // true
- * mh3.isThinWaistAddress()
- * // false
- */
-Multiaddr.prototype.isThinWaistAddress = function isThinWaistAddress (addr) {
-  const protos = (addr || this).protos()
-
-  if (protos.length !== 2) {
-    return false
+    return {
+      family: (codes[0] === 41 || codes[0] === 55) ? 6 : 4,
+      address: parts[1],
+      port: parseInt(parts[3]) // tcp or udp port
+    }
   }
 
-  if (protos[0].code !== 4 && protos[0].code !== 41) {
-    return false
+  /**
+   * Returns if a Multiaddr is a Thin Waist address or not.
+   *
+   * Thin Waist is if a Multiaddr adheres to the standard combination of:
+   *
+   * `{IPv4, IPv6}/{TCP, UDP}`
+   *
+   * @example
+   * ```js
+   * const mh1 = new Multiaddr('/ip4/127.0.0.1/tcp/4001')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   * const mh2 = new Multiaddr('/ip4/192.168.2.1/tcp/5001')
+   * // <Multiaddr 04c0a80201061389 - /ip4/192.168.2.1/tcp/5001>
+   * const mh3 = mh1.encapsulate(mh2)
+   * // <Multiaddr 047f000001060fa104c0a80201061389 - /ip4/127.0.0.1/tcp/4001/ip4/192.168.2.1/tcp/5001>
+   * const mh4 = new Multiaddr('/ip4/127.0.0.1/tcp/2000/wss/p2p-webrtc-star/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
+   * // <Multiaddr 047f0000010607d0de039302a503221220d52ebb89d85b02a284948203a62ff28389c57c9f42beec4ec20db76a64835843 - /ip4/127.0.0.1/tcp/2000/wss/p2p-webrtc-star/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a>
+   * mh1.isThinWaistAddress()
+   * // true
+   * mh2.isThinWaistAddress()
+   * // true
+   * mh3.isThinWaistAddress()
+   * // false
+   * mh4.isThinWaistAddress()
+   * // false
+   * ```
+   *
+   * @param {Multiaddr} [addr] - Defaults to using `this` instance
+   */
+  isThinWaistAddress (addr) {
+    const protos = (addr || this).protos()
+
+    if (protos.length !== 2) {
+      return false
+    }
+
+    if (protos[0].code !== 4 && protos[0].code !== 41) {
+      return false
+    }
+    if (protos[1].code !== 6 && protos[1].code !== 273) {
+      return false
+    }
+    return true
   }
-  if (protos[1].code !== 6 && protos[1].code !== 273) {
-    return false
+
+  /**
+   * Creates a Multiaddr from a node-friendly address object
+   *
+   * @example
+   * ```js
+   * Multiaddr.fromNodeAddress({address: '127.0.0.1', port: '4001'}, 'tcp')
+   * // <Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>
+   * ```
+   *
+   * @param {{family: 4 | 6, address: string, port: number}} addr
+   * @param {string} transport
+   */
+  static fromNodeAddress (addr, transport) {
+    if (!addr) { throw new Error('requires node address object') }
+    if (!transport) { throw new Error('requires transport protocol') }
+    let ip
+    switch (addr.family) {
+      case 4:
+        ip = 'ip4'
+        break
+      case 6:
+        ip = 'ip6'
+        break
+      default:
+        throw Error(`Invalid addr family. Got '${addr.family}' instead of 4 or 6`)
+    }
+    return new Multiaddr('/' + [ip, addr.address, transport, addr.port].join('/'))
   }
-  return true
+
+  /**
+   * Returns if something is a Multiaddr that is a name
+   *
+   * @param {Multiaddr} addr
+   * @returns {boolean} isName
+   */
+  static isName (addr) {
+    if (!Multiaddr.isMultiaddr(addr)) {
+      return false
+    }
+
+    // if a part of the multiaddr is resolvable, then return true
+    return addr.protos().some((proto) => proto.resolvable)
+  }
+
+  /**
+   * Check if object is a CID instance
+   *
+   * @param {any} value
+   * @returns {value is Multiaddr}
+   */
+  static isMultiaddr (value) {
+    return value instanceof Multiaddr || Boolean(value && value[symbol])
+  }
+
+  /**
+   * Returns Multiaddr as a human-readable string.
+   * For post Node.js v10.0.0.
+   * https://nodejs.org/api/deprecations.html#deprecations_dep0079_custom_inspection_function_on_objects_via_inspect
+   *
+   * @example
+   * ```js
+   * console.log(new Multiaddr('/ip4/127.0.0.1/tcp/4001'))
+   * // '<Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>'
+   * ```
+   *
+   * @returns {string}
+   */
+  [inspect] () {
+    return '<Multiaddr ' +
+    uint8ArrayToString(this.bytes, 'base16') + ' - ' +
+    codec.bytesToString(this.bytes) + '>'
+  }
+
+  /**
+   * Returns Multiaddr as a human-readable string.
+   * Fallback for pre Node.js v10.0.0.
+   * https://nodejs.org/api/deprecations.html#deprecations_dep0079_custom_inspection_function_on_objects_via_inspect
+   *
+   * @example
+   * ```js
+   * new Multiaddr('/ip4/127.0.0.1/tcp/4001').inspect()
+   * // '<Multiaddr 047f000001060fa1 - /ip4/127.0.0.1/tcp/4001>'
+   * ```
+   *
+   * @returns {string}
+   */
+  inspect () {
+    return '<Multiaddr ' +
+      uint8ArrayToString(this.bytes, 'base16') + ' - ' +
+      codec.bytesToString(this.bytes) + '>'
+  }
 }
 
 /**
@@ -34605,49 +31942,22 @@ Multiaddr.prototype.isThinWaistAddress = function isThinWaistAddress (addr) {
  * [`.protoCodes()`](#multiaddrprotocodes) or
  * [`.protoNames()`](#multiaddrprotonames)
  *
- * @instance
  * @returns {{table: Array, names: Object, codes: Object}}
- *
  */
 Multiaddr.protocols = protocols
 
-/**
- * Returns if something is a Multiaddr that is a name
- *
- * @param {Multiaddr} addr
- * @returns {Bool} isName
- */
-Multiaddr.isName = function isName (addr) {
-  if (!Multiaddr.isMultiaddr(addr)) {
-    return false
-  }
-
-  // if a part of the multiaddr is resolvable, then return true
-  return addr.protos().some((proto) => proto.resolvable)
-}
-
-/**
- * Returns an array of multiaddrs, by resolving the multiaddr that is a name
- *
- * @async
- * @param {Multiaddr} addr
- * @returns {Multiaddr[]}
- */
-Multiaddr.resolve = function resolve (addr) {
-  if (!Multiaddr.isMultiaddr(addr) || !Multiaddr.isName(addr)) {
-    return Promise.reject(Error('not a valid name'))
-  }
-
-  /*
-   * Needs more consideration from spec design:
-   *   - what to return
-   *   - how to achieve it in the browser?
-   */
-  return Promise.reject(new Error('not implemented yet'))
-}
-
 Multiaddr.resolvers = resolvers
-exports = module.exports = Multiaddr
+
+/**
+ * Static factory
+ *
+ * @param {MultiaddrInput} addr
+ */
+function multiaddr (addr) {
+  return new Multiaddr(addr)
+}
+
+module.exports = { Multiaddr, multiaddr, protocols, resolvers }
 
 
 /***/ }),
@@ -34659,29 +31969,32 @@ exports = module.exports = Multiaddr
 
 
 const isIp = __nccwpck_require__(4975)
-const uint8ArrayToString = __nccwpck_require__(5140)
+const uint8ArrayToString = __nccwpck_require__(757)
 
 const isIP = isIp
 const isV4 = isIp.v4
 const isV6 = isIp.v6
 
 // Copied from https://github.com/indutny/node-ip/blob/master/lib/ip.js#L7
+// @ts-ignore - this is copied from the link above better to keep it the same
 const toBytes = function (ip, buff, offset) {
   offset = ~~offset
 
-  var result
+  let result
 
   if (isV4(ip)) {
     result = buff || new Uint8Array(offset + 4)
+    // @ts-ignore
+    // eslint-disable-next-line array-callback-return
     ip.split(/\./g).map(function (byte) {
       result[offset++] = parseInt(byte, 10) & 0xff
     })
   } else if (isV6(ip)) {
-    var sections = ip.split(':', 8)
+    const sections = ip.split(':', 8)
 
-    var i
+    let i
     for (i = 0; i < sections.length; i++) {
-      var isv4 = isV4(sections[i])
+      const isv4 = isV4(sections[i])
       var v4Buffer
 
       if (isv4) {
@@ -34700,7 +32013,7 @@ const toBytes = function (ip, buff, offset) {
       while (sections.length < 8) sections.push('0')
     } else if (sections.length < 8) {
       for (i = 0; i < sections.length && sections[i] !== ''; i++);
-      var argv = [i, '1']
+      const argv = [i, '1']
       for (i = 9 - sections.length; i > 0; i--) {
         argv.push('0')
       }
@@ -34709,7 +32022,7 @@ const toBytes = function (ip, buff, offset) {
 
     result = buff || new Uint8Array(offset + 16)
     for (i = 0; i < sections.length; i++) {
-      var word = parseInt(sections[i], 16)
+      const word = parseInt(sections[i], 16)
       result[offset++] = (word >> 8) & 0xff
       result[offset++] = word & 0xff
     }
@@ -34723,12 +32036,13 @@ const toBytes = function (ip, buff, offset) {
 }
 
 // Copied from https://github.com/indutny/node-ip/blob/master/lib/ip.js#L63
+// @ts-ignore - this is copied from the link above better to keep it the same
 const toString = function (buff, offset, length) {
   offset = ~~offset
   length = length || (buff.length - offset)
 
-  var result = []
-  var string
+  const result = []
+  let string
   const view = new DataView(buff.buffer)
   if (length === 4) {
     // IPv4
@@ -34765,7 +32079,14 @@ module.exports = {
 
 "use strict";
 
+/** @typedef {import("./types").Protocol} Protocol */
 
+/**
+ * Protocols
+ *
+ * @param {number | string} proto
+ * @returns {Protocol}
+ */
 function Protocols (proto) {
   if (typeof (proto) === 'number') {
     if (Protocols.codes[proto]) {
@@ -34773,7 +32094,7 @@ function Protocols (proto) {
     }
 
     throw new Error('no protocol with code: ' + proto)
-  } else if (typeof (proto) === 'string' || proto instanceof String) {
+  } else if (typeof (proto) === 'string') {
     if (Protocols.names[proto]) {
       return Protocols.names[proto]
     }
@@ -34788,6 +32109,7 @@ const V = -1
 Protocols.lengthPrefixedVarSize = V
 Protocols.V = V
 
+/** @type {Array<[number, number, string, (string|boolean)?, string?]>} */
 Protocols.table = [
   [4, 32, 'ip4'],
   [6, 16, 'tcp'],
@@ -34824,8 +32146,9 @@ Protocols.table = [
   [480, 0, 'http'],
   [777, V, 'memory']
 ]
-
+/** @type {Record<string,Protocol>} */
 Protocols.names = {}
+/** @type {Record<number,Protocol>} */
 Protocols.codes = {}
 
 // populate tables
@@ -34833,10 +32156,22 @@ Protocols.table.map(row => {
   const proto = p.apply(null, row)
   Protocols.codes[proto.code] = proto
   Protocols.names[proto.name] = proto
+  return null
 })
 
 Protocols.object = p
 
+/**
+ *
+ * Create a protocol
+ *
+ * @param {number} code
+ * @param {number} size
+ * @param {string} name
+ * @param {any} [resolvable]
+ * @param {any} [path]
+ * @returns {Protocol}
+ */
 function p (code, size, name, resolvable, path) {
   return {
     code,
@@ -35065,7 +32400,6 @@ function decode (data) {
  * Is the given data multibase encoded?
  *
  * @param {Uint8Array|string} data
- * @returns {false | string}
  */
 function isEncoded (data) {
   if (data instanceof Uint8Array) {
@@ -35276,13 +32610,10 @@ module.exports = { rfc4648 }
 /***/ }),
 
 /***/ 56:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ ((module) => {
 
 "use strict";
 
-
-// @ts-ignore
-const { TextEncoder, TextDecoder } = __nccwpck_require__(2287)
 
 const textDecoder = new TextDecoder()
 /**
@@ -36762,83 +34093,6 @@ module.exports = {
 
 /***/ }),
 
-/***/ 3678:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * @typedef {{ [key: string]: any }} Extensions
- * @typedef {Error} Err
- * @property {string} message
- */
-
-/**
- *
- * @param {Error} obj
- * @param {Extensions} props
- * @returns {Error & Extensions}
- */
-function assign(obj, props) {
-    for (const key in props) {
-        Object.defineProperty(obj, key, {
-            value: props[key],
-            enumerable: true,
-            configurable: true,
-        });
-    }
-
-    return obj;
-}
-
-/**
- *
- * @param {any} err - An Error
- * @param {string|Extensions} code - A string code or props to set on the error
- * @param {Extensions} [props] - Props to set on the error
- * @returns {Error & Extensions}
- */
-function createError(err, code, props) {
-    if (!err || typeof err === 'string') {
-        throw new TypeError('Please pass an Error to err-code');
-    }
-
-    if (!props) {
-        props = {};
-    }
-
-    if (typeof code === 'object') {
-        props = code;
-        code = '';
-    }
-
-    if (code) {
-        props.code = code;
-    }
-
-    try {
-        return assign(err, props);
-    } catch (_) {
-        props.message = err.message;
-        props.stack = err.stack;
-
-        const ErrClass = function () {};
-
-        ErrClass.prototype = Object.create(Object.getPrototypeOf(err));
-
-        // @ts-ignore
-        const output = assign(new ErrClass(), props);
-
-        return output;
-    }
-}
-
-module.exports = createError;
-
-
-/***/ }),
-
 /***/ 1061:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -36980,7 +34234,7 @@ module.exports = {
 "use strict";
 
 
-const errcode = __nccwpck_require__(3678)
+const errcode = __nccwpck_require__(2997)
 const multihash = __nccwpck_require__(450)
 const crypto = __nccwpck_require__(1315)
 const equals = __nccwpck_require__(333)
@@ -37827,10 +35081,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
 
 var Stream = _interopDefault(__nccwpck_require__(2413));
-var http = _interopDefault(__nccwpck_require__(5876));
+var http = _interopDefault(__nccwpck_require__(8605));
 var Url = _interopDefault(__nccwpck_require__(8835));
 var https = _interopDefault(__nccwpck_require__(7211));
-var zlib = _interopDefault(__nccwpck_require__(1903));
+var zlib = _interopDefault(__nccwpck_require__(8761));
 
 // Based on https://github.com/tmpvar/jsdom/blob/aa85b2abf07766ff7bf5c1f6daafb3726f2f2db5/lib/jsdom/living/blob.js
 
@@ -39240,7 +36494,7 @@ function fetch(url, opts) {
 			let error = new AbortError('The user aborted a request.');
 			reject(error);
 			if (request.body && request.body instanceof Stream.Readable) {
-				request.body.destroy(error);
+				destroyStream(request.body, error);
 			}
 			if (!response || !response.body) return;
 			response.body.emit('error', error);
@@ -39281,8 +36535,40 @@ function fetch(url, opts) {
 
 		req.on('error', function (err) {
 			reject(new FetchError(`request to ${request.url} failed, reason: ${err.message}`, 'system', err));
+
+			if (response && response.body) {
+				destroyStream(response.body, err);
+			}
+
 			finalize();
 		});
+
+		fixResponseChunkedTransferBadEnding(req, function (err) {
+			if (signal && signal.aborted) {
+				return;
+			}
+
+			destroyStream(response.body, err);
+		});
+
+		/* c8 ignore next 18 */
+		if (parseInt(process.version.substring(1)) < 14) {
+			// Before Node.js 14, pipeline() does not fully support async iterators and does not always
+			// properly handle when the socket close/end events are out of order.
+			req.on('socket', function (s) {
+				s.addListener('close', function (hadError) {
+					// if a data listener is still present we didn't end cleanly
+					const hasDataListener = s.listenerCount('data') > 0;
+
+					// if end happened before close but the socket didn't emit an error, do it now
+					if (response && hasDataListener && !hadError && !(signal && signal.aborted)) {
+						const err = new Error('Premature close');
+						err.code = 'ERR_STREAM_PREMATURE_CLOSE';
+						response.body.emit('error', err);
+					}
+				});
+			});
+		}
 
 		req.on('response', function (res) {
 			clearTimeout(reqTimeout);
@@ -39449,6 +36735,41 @@ function fetch(url, opts) {
 		writeToStream(req, request);
 	});
 }
+function fixResponseChunkedTransferBadEnding(request, errorCallback) {
+	let socket;
+
+	request.on('socket', function (s) {
+		socket = s;
+	});
+
+	request.on('response', function (response) {
+		const headers = response.headers;
+
+		if (headers['transfer-encoding'] === 'chunked' && !headers['content-length']) {
+			response.once('close', function (hadError) {
+				// if a data listener is still present we didn't end cleanly
+				const hasDataListener = socket.listenerCount('data') > 0;
+
+				if (hasDataListener && !hadError) {
+					const err = new Error('Premature close');
+					err.code = 'ERR_STREAM_PREMATURE_CLOSE';
+					errorCallback(err);
+				}
+			});
+		}
+	});
+}
+
+function destroyStream(stream, err) {
+	if (stream.destroy) {
+		stream.destroy(err);
+	} else {
+		// node < 8
+		stream.emit('error', err);
+		stream.end();
+	}
+}
+
 /**
  * Redirect code matching
  *
@@ -39544,7 +36865,7 @@ module.exports = class PFifo {
 "use strict";
 
 
-var duration = /(-?(?:\d+\.?\d*|\d*\.?\d+)(?:e[-+]?\d+)?)\s*([a-zµμ]*)/ig
+var durationRE = /(-?(?:\d+\.?\d*|\d*\.?\d+)(?:e[-+]?\d+)?)\s*([\p{L}]*)/uig
 
 module.exports = parse
 // enable default import syntax in typescript
@@ -39563,7 +36884,8 @@ parse.us =
 parse.microsecond = 1 / 1e3
 
 parse.millisecond =
-parse.ms = 1
+parse.ms =
+parse[''] = 1
 
 parse.second =
 parse.sec =
@@ -39602,2786 +36924,1976 @@ parse.y = parse.d * 365.25
 
 function parse(str='', format='ms'){
   var result = null
-  // ignore commas
-  str = str.replace(/(\d),(\d)/g, '$1$2')
-  str.replace(duration, function(_, n, units){
-    units = parse[units] || parse[units.toLowerCase().replace(/s$/, '')]
+  // ignore commas/placeholders
+  str = (str+'').replace(/(\d)[,_](\d)/g, '$1$2')
+  str.replace(durationRE, function(_, n, units){
+    units = unitRatio(units)
     if (units) result = (result || 0) + parseFloat(n, 10) * units
   })
 
-  return result && (result / parse[format])
+  return result && (result / (unitRatio(format) || 1))
+}
+
+function unitRatio(str) {
+  return parse[str] || parse[str.toLowerCase().replace(/s$/, '')]
 }
 
 
 /***/ }),
 
-/***/ 8917:
+/***/ 6916:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var parse = __nccwpck_require__(731)
-var stringify = __nccwpck_require__(8909)
+"use strict";
+// minimal library entry point.
 
-module.exports = parse
-module.exports.parse = parse
-module.exports.stringify = stringify
+
+module.exports = __nccwpck_require__(3242);
 
 
 /***/ }),
 
-/***/ 731:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ 3242:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
-var tokenize = __nccwpck_require__(6234)
-var MAX_RANGE = 0x1FFFFFFF
+"use strict";
 
-// "Only repeated fields of primitive numeric types (types which use the varint, 32-bit, or 64-bit wire types) can be declared "packed"."
-// https://developers.google.com/protocol-buffers/docs/encoding#optional
-var PACKABLE_TYPES = [
-  // varint wire types
-  'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64', 'bool',
-  // + ENUMS
-  // 64-bit wire types
-  'fixed64', 'sfixed64', 'double',
-  // 32-bit wire types
-  'fixed32', 'sfixed32', 'float'
-]
+var protobuf = exports;
 
-var onfieldoptionvalue = function (tokens) {
-  var value = tokens.shift()
-  if (value !== '{') {
-    return value
-  }
-  value = {}
-  var field = ''
-  while (tokens.length) {
-    switch (tokens[0]) {
-      case '}':
-        tokens.shift()
-        return value
-      case ':':
-        tokens.shift()
-        value[field] = onfieldoptionvalue(tokens)
-        break
-      default:
-        field = tokens.shift()
-    }
-  }
+/**
+ * Build type, one of `"full"`, `"light"` or `"minimal"`.
+ * @name build
+ * @type {string}
+ * @const
+ */
+protobuf.build = "minimal";
+
+// Serialization
+protobuf.Writer       = __nccwpck_require__(3098);
+protobuf.BufferWriter = __nccwpck_require__(1863);
+protobuf.Reader       = __nccwpck_require__(1011);
+protobuf.BufferReader = __nccwpck_require__(339);
+
+// Utility
+protobuf.util         = __nccwpck_require__(1241);
+protobuf.rpc          = __nccwpck_require__(6444);
+protobuf.roots        = __nccwpck_require__(73);
+protobuf.configure    = configure;
+
+/* istanbul ignore next */
+/**
+ * Reconfigures the library according to the environment.
+ * @returns {undefined}
+ */
+function configure() {
+    protobuf.util._configure();
+    protobuf.Writer._configure(protobuf.BufferWriter);
+    protobuf.Reader._configure(protobuf.BufferReader);
 }
 
-var onfieldoptions = function (tokens) {
-  var opts = {}
-
-  while (tokens.length) {
-    switch (tokens[0]) {
-      case '[':
-      case ',': {
-        tokens.shift()
-        var name = tokens.shift()
-        if (name === '(') { // handling [(A) = B]
-          name = tokens.shift()
-          tokens.shift() // remove the end of bracket
-        }
-        var field = []
-        if (tokens[0][0] === '.') {
-          field = tokens[0].substr(1).split('.')
-          tokens.shift()
-        }
-        if (tokens[0] !== '=') throw new Error('Unexpected token in field options: ' + tokens[0])
-        tokens.shift()
-        if (tokens[0] === ']') throw new Error('Unexpected ] in field option')
-
-        // for option (A).b.c
-        // path will be ['A', 'b'] and lastFieldName 'c'
-        var path = [name].concat(field)
-        var lastFieldName = path.pop()
-
-        // opt references opts.A.b
-        var opt = path.reduce(function (opt, n, index) {
-          if (opt[n] == null) {
-            opt[n] = {}
-          }
-          return opt[n]
-        }, opts)
-
-        // now set opt['c'] that references opts.A.b['c']
-        opt[lastFieldName] = onfieldoptionvalue(tokens)
-        break
-      }
-      case ']':
-        tokens.shift()
-        return opts
-
-      default:
-        throw new Error('Unexpected token in field options: ' + tokens[0])
-    }
-  }
-
-  throw new Error('No closing tag for field options')
-}
-
-var onfield = function (tokens) {
-  var field = {
-    name: null,
-    type: null,
-    tag: -1,
-    map: null,
-    oneof: null,
-    required: false,
-    repeated: false,
-    options: {}
-  }
-
-  while (tokens.length) {
-    switch (tokens[0]) {
-      case '=':
-        tokens.shift()
-        field.tag = Number(tokens.shift())
-        break
-
-      case 'map':
-        field.type = 'map'
-        field.map = { from: null, to: null }
-        tokens.shift()
-        if (tokens[0] !== '<') throw new Error('Unexpected token in map type: ' + tokens[0])
-        tokens.shift()
-        field.map.from = tokens.shift()
-        if (tokens[0] !== ',') throw new Error('Unexpected token in map type: ' + tokens[0])
-        tokens.shift()
-        field.map.to = tokens.shift()
-        if (tokens[0] !== '>') throw new Error('Unexpected token in map type: ' + tokens[0])
-        tokens.shift()
-        field.name = tokens.shift()
-        break
-
-      case 'repeated':
-      case 'required':
-      case 'optional':
-        var t = tokens.shift()
-        field.required = t === 'required'
-        field.repeated = t === 'repeated'
-        field.type = tokens.shift()
-        field.name = tokens.shift()
-        break
-
-      case '[':
-        field.options = onfieldoptions(tokens)
-        break
-
-      case ';':
-        if (field.name === null) throw new Error('Missing field name')
-        if (field.type === null) throw new Error('Missing type in message field: ' + field.name)
-        if (field.tag === -1) throw new Error('Missing tag number in message field: ' + field.name)
-        tokens.shift()
-        return field
-
-      default:
-        throw new Error('Unexpected token in message field: ' + tokens[0])
-    }
-  }
-
-  throw new Error('No ; found for message field')
-}
-
-var onmessagebody = function (tokens) {
-  var body = {
-    enums: [],
-    options: {},
-    messages: [],
-    fields: [],
-    extends: [],
-    extensions: null
-  }
-
-  while (tokens.length) {
-    switch (tokens[0]) {
-      case 'map':
-      case 'repeated':
-      case 'optional':
-      case 'required':
-        body.fields.push(onfield(tokens))
-        break
-
-      case 'enum':
-        body.enums.push(onenum(tokens))
-        break
-
-      case 'message':
-        body.messages.push(onmessage(tokens))
-        break
-
-      case 'extensions':
-        body.extensions = onextensions(tokens)
-        break
-
-      case 'oneof':
-        tokens.shift()
-        var name = tokens.shift()
-        if (tokens[0] !== '{') throw new Error('Unexpected token in oneof: ' + tokens[0])
-        tokens.shift()
-        while (tokens[0] !== '}') {
-          tokens.unshift('optional')
-          var field = onfield(tokens)
-          field.oneof = name
-          body.fields.push(field)
-        }
-        tokens.shift()
-        break
-
-      case 'extend':
-        body.extends.push(onextend(tokens))
-        break
-
-      case ';':
-        tokens.shift()
-        break
-
-      case 'reserved':
-        tokens.shift()
-        while (tokens[0] !== ';') {
-          tokens.shift()
-        }
-        break
-
-      case 'option':
-        var opt = onoption(tokens)
-        if (body.options[opt.name] !== undefined) throw new Error('Duplicate option ' + opt.name)
-        body.options[opt.name] = opt.value
-        break
-
-      default:
-        // proto3 does not require the use of optional/required, assumed as optional
-        // "singular: a well-formed message can have zero or one of this field (but not more than one)."
-        // https://developers.google.com/protocol-buffers/docs/proto3#specifying-field-rules
-        tokens.unshift('optional')
-        body.fields.push(onfield(tokens))
-    }
-  }
-
-  return body
-}
-
-var onextend = function (tokens) {
-  var out = {
-    name: tokens[1],
-    message: onmessage(tokens)
-  }
-  return out
-}
-
-var onextensions = function (tokens) {
-  tokens.shift()
-  var from = Number(tokens.shift())
-  if (isNaN(from)) throw new Error('Invalid from in extensions definition')
-  if (tokens.shift() !== 'to') throw new Error("Expected keyword 'to' in extensions definition")
-  var to = tokens.shift()
-  if (to === 'max') to = MAX_RANGE
-  to = Number(to)
-  if (isNaN(to)) throw new Error('Invalid to in extensions definition')
-  if (tokens.shift() !== ';') throw new Error('Missing ; in extensions definition')
-  return { from: from, to: to }
-}
-var onmessage = function (tokens) {
-  tokens.shift()
-
-  var lvl = 1
-  var body = []
-  var msg = {
-    name: tokens.shift(),
-    options: {},
-    enums: [],
-    extends: [],
-    messages: [],
-    fields: []
-  }
-
-  if (tokens[0] !== '{') throw new Error('Expected { but found ' + tokens[0])
-  tokens.shift()
-
-  while (tokens.length) {
-    if (tokens[0] === '{') lvl++
-    else if (tokens[0] === '}') lvl--
-
-    if (!lvl) {
-      tokens.shift()
-      body = onmessagebody(body)
-      msg.enums = body.enums
-      msg.messages = body.messages
-      msg.fields = body.fields
-      msg.extends = body.extends
-      msg.extensions = body.extensions
-      msg.options = body.options
-      return msg
-    }
-
-    body.push(tokens.shift())
-  }
-
-  if (lvl) throw new Error('No closing tag for message')
-}
-
-var onpackagename = function (tokens) {
-  tokens.shift()
-  var name = tokens.shift()
-  if (tokens[0] !== ';') throw new Error('Expected ; but found ' + tokens[0])
-  tokens.shift()
-  return name
-}
-
-var onsyntaxversion = function (tokens) {
-  tokens.shift()
-
-  if (tokens[0] !== '=') throw new Error('Expected = but found ' + tokens[0])
-  tokens.shift()
-
-  var version = tokens.shift()
-  switch (version) {
-    case '"proto2"':
-      version = 2
-      break
-
-    case '"proto3"':
-      version = 3
-      break
-
-    default:
-      throw new Error('Expected protobuf syntax version but found ' + version)
-  }
-
-  if (tokens[0] !== ';') throw new Error('Expected ; but found ' + tokens[0])
-  tokens.shift()
-
-  return version
-}
-
-var onenumvalue = function (tokens) {
-  if (tokens.length < 4) throw new Error('Invalid enum value: ' + tokens.slice(0, 3).join(' '))
-  if (tokens[1] !== '=') throw new Error('Expected = but found ' + tokens[1])
-  if (tokens[3] !== ';' && tokens[3] !== '[') throw new Error('Expected ; or [ but found ' + tokens[1])
-
-  var name = tokens.shift()
-  tokens.shift()
-  var val = {
-    value: null,
-    options: {}
-  }
-  val.value = Number(tokens.shift())
-  if (tokens[0] === '[') {
-    val.options = onfieldoptions(tokens)
-  }
-  tokens.shift() // expecting the semicolon here
-
-  return {
-    name: name,
-    val: val
-  }
-}
-
-var onenum = function (tokens) {
-  tokens.shift()
-  var options = {}
-  var e = {
-    name: tokens.shift(),
-    values: {},
-    options: {}
-  }
-
-  if (tokens[0] !== '{') throw new Error('Expected { but found ' + tokens[0])
-  tokens.shift()
-
-  while (tokens.length) {
-    if (tokens[0] === '}') {
-      tokens.shift()
-      // there goes optional semicolon after the enclosing "}"
-      if (tokens[0] === ';') tokens.shift()
-      return e
-    }
-    if (tokens[0] === 'option') {
-      options = onoption(tokens)
-      e.options[options.name] = options.value
-      continue
-    }
-    var val = onenumvalue(tokens)
-    e.values[val.name] = val.val
-  }
-
-  throw new Error('No closing tag for enum')
-}
-
-var onoption = function (tokens) {
-  var name = null
-  var value = null
-
-  var parse = function (value) {
-    if (value === 'true') return true
-    if (value === 'false') return false
-    return value.replace(/^"+|"+$/gm, '')
-  }
-
-  while (tokens.length) {
-    if (tokens[0] === ';') {
-      tokens.shift()
-      return { name: name, value: value }
-    }
-    switch (tokens[0]) {
-      case 'option':
-        tokens.shift()
-
-        var hasBracket = tokens[0] === '('
-        if (hasBracket) tokens.shift()
-
-        name = tokens.shift()
-
-        if (hasBracket) {
-          if (tokens[0] !== ')') throw new Error('Expected ) but found ' + tokens[0])
-          tokens.shift()
-        }
-
-        if (tokens[0][0] === '.') {
-          name += tokens.shift()
-        }
-
-        break
-
-      case '=':
-        tokens.shift()
-        if (name === null) throw new Error('Expected key for option with value: ' + tokens[0])
-        value = parse(tokens.shift())
-
-        if (name === 'optimize_for' && !/^(SPEED|CODE_SIZE|LITE_RUNTIME)$/.test(value)) {
-          throw new Error('Unexpected value for option optimize_for: ' + value)
-        } else if (value === '{') {
-          // option foo = {bar: baz}
-          value = onoptionMap(tokens)
-        }
-        break
-
-      default:
-        throw new Error('Unexpected token in option: ' + tokens[0])
-    }
-  }
-}
-
-var onoptionMap = function (tokens) {
-  var parse = function (value) {
-    if (value === 'true') return true
-    if (value === 'false') return false
-    return value.replace(/^"+|"+$/gm, '')
-  }
-
-  var map = {}
-
-  while (tokens.length) {
-    if (tokens[0] === '}') {
-      tokens.shift()
-      return map
-    }
-
-    var hasBracket = tokens[0] === '('
-    if (hasBracket) tokens.shift()
-
-    var key = tokens.shift()
-    if (hasBracket) {
-      if (tokens[0] !== ')') throw new Error('Expected ) but found ' + tokens[0])
-      tokens.shift()
-    }
-
-    var value = null
-
-    switch (tokens[0]) {
-      case ':':
-        if (map[key] !== undefined) throw new Error('Duplicate option map key ' + key)
-
-        tokens.shift()
-
-        value = parse(tokens.shift())
-
-        if (value === '{') {
-          // option foo = {bar: baz}
-          value = onoptionMap(tokens)
-        }
-
-        map[key] = value
-
-        if (tokens[0] === ';') {
-          tokens.shift()
-        }
-        break
-
-      case '{':
-        tokens.shift()
-        value = onoptionMap(tokens)
-
-        if (map[key] === undefined) map[key] = []
-        if (!Array.isArray(map[key])) throw new Error('Duplicate option map key ' + key)
-
-        map[key].push(value)
-        break
-
-      default:
-        throw new Error('Unexpected token in option map: ' + tokens[0])
-    }
-  }
-
-  throw new Error('No closing tag for option map')
-}
-
-var onimport = function (tokens) {
-  tokens.shift()
-  var file = tokens.shift().replace(/^"+|"+$/gm, '')
-
-  if (tokens[0] !== ';') throw new Error('Unexpected token: ' + tokens[0] + '. Expected ";"')
-
-  tokens.shift()
-  return file
-}
-
-var onservice = function (tokens) {
-  tokens.shift()
-
-  var service = {
-    name: tokens.shift(),
-    methods: [],
-    options: {}
-  }
-
-  if (tokens[0] !== '{') throw new Error('Expected { but found ' + tokens[0])
-  tokens.shift()
-
-  while (tokens.length) {
-    if (tokens[0] === '}') {
-      tokens.shift()
-      // there goes optional semicolon after the enclosing "}"
-      if (tokens[0] === ';') tokens.shift()
-      return service
-    }
-
-    switch (tokens[0]) {
-      case 'option':
-        var opt = onoption(tokens)
-        if (service.options[opt.name] !== undefined) throw new Error('Duplicate option ' + opt.name)
-        service.options[opt.name] = opt.value
-        break
-      case 'rpc':
-        service.methods.push(onrpc(tokens))
-        break
-      default:
-        throw new Error('Unexpected token in service: ' + tokens[0])
-    }
-  }
-
-  throw new Error('No closing tag for service')
-}
-
-var onrpc = function (tokens) {
-  tokens.shift()
-
-  var rpc = {
-    name: tokens.shift(),
-    input_type: null,
-    output_type: null,
-    client_streaming: false,
-    server_streaming: false,
-    options: {}
-  }
-
-  if (tokens[0] !== '(') throw new Error('Expected ( but found ' + tokens[0])
-  tokens.shift()
-
-  if (tokens[0] === 'stream') {
-    tokens.shift()
-    rpc.client_streaming = true
-  }
-
-  rpc.input_type = tokens.shift()
-
-  if (tokens[0] !== ')') throw new Error('Expected ) but found ' + tokens[0])
-  tokens.shift()
-
-  if (tokens[0] !== 'returns') throw new Error('Expected returns but found ' + tokens[0])
-  tokens.shift()
-
-  if (tokens[0] !== '(') throw new Error('Expected ( but found ' + tokens[0])
-  tokens.shift()
-
-  if (tokens[0] === 'stream') {
-    tokens.shift()
-    rpc.server_streaming = true
-  }
-
-  rpc.output_type = tokens.shift()
-
-  if (tokens[0] !== ')') throw new Error('Expected ) but found ' + tokens[0])
-  tokens.shift()
-
-  if (tokens[0] === ';') {
-    tokens.shift()
-    return rpc
-  }
-
-  if (tokens[0] !== '{') throw new Error('Expected { but found ' + tokens[0])
-  tokens.shift()
-
-  while (tokens.length) {
-    if (tokens[0] === '}') {
-      tokens.shift()
-      // there goes optional semicolon after the enclosing "}"
-      if (tokens[0] === ';') tokens.shift()
-      return rpc
-    }
-
-    if (tokens[0] === 'option') {
-      var opt = onoption(tokens)
-      if (rpc.options[opt.name] !== undefined) throw new Error('Duplicate option ' + opt.name)
-      rpc.options[opt.name] = opt.value
-    } else {
-      throw new Error('Unexpected token in rpc options: ' + tokens[0])
-    }
-  }
-
-  throw new Error('No closing tag for rpc')
-}
-
-var parse = function (buf) {
-  var tokens = tokenize(buf.toString())
-  // check for isolated strings in tokens by looking for opening quote
-  for (var i = 0; i < tokens.length; i++) {
-    if (/^("|')([^'"]*)$/.test(tokens[i])) {
-      var j
-      if (tokens[i].length === 1) {
-        j = i + 1
-      } else {
-        j = i
-      }
-      // look ahead for the closing quote and collapse all
-      // in-between tokens into a single token
-      for (j; j < tokens.length; j++) {
-        if (/^[^'"\\]*(?:\\.[^'"\\]*)*("|')$/.test(tokens[j])) {
-          tokens = tokens.slice(0, i).concat(tokens.slice(i, j + 1).join('')).concat(tokens.slice(j + 1))
-          break
-        }
-      }
-    }
-  }
-  var schema = {
-    syntax: 3,
-    package: null,
-    imports: [],
-    enums: [],
-    messages: [],
-    options: {},
-    extends: []
-  }
-
-  var firstline = true
-
-  while (tokens.length) {
-    switch (tokens[0]) {
-      case 'package':
-        schema.package = onpackagename(tokens)
-        break
-
-      case 'syntax':
-        if (!firstline) throw new Error('Protobuf syntax version should be first thing in file')
-        schema.syntax = onsyntaxversion(tokens)
-        break
-
-      case 'message':
-        schema.messages.push(onmessage(tokens))
-        break
-
-      case 'enum':
-        schema.enums.push(onenum(tokens))
-        break
-
-      case 'option':
-        var opt = onoption(tokens)
-        if (schema.options[opt.name]) throw new Error('Duplicate option ' + opt.name)
-        schema.options[opt.name] = opt.value
-        break
-
-      case 'import':
-        schema.imports.push(onimport(tokens))
-        break
-
-      case 'extend':
-        schema.extends.push(onextend(tokens))
-        break
-
-      case 'service':
-        if (!schema.services) schema.services = []
-        schema.services.push(onservice(tokens))
-        break
-
-      default:
-        throw new Error('Unexpected token: ' + tokens[0])
-    }
-    firstline = false
-  }
-
-  // now iterate over messages and propagate extends
-  schema.extends.forEach(function (ext) {
-    schema.messages.forEach(function (msg) {
-      if (msg.name === ext.name) {
-        ext.message.fields.forEach(function (field) {
-          if (!msg.extensions || field.tag < msg.extensions.from || field.tag > msg.extensions.to) {
-            throw new Error(msg.name + ' does not declare ' + field.tag + ' as an extension number')
-          }
-          msg.fields.push(field)
-        })
-      }
-    })
-  })
-
-  schema.messages.forEach(function (msg) {
-    msg.fields.forEach(function (field) {
-      var fieldSplit
-      var messageName
-      var nestedEnumName
-      var message
-
-      function enumNameIsFieldType (en) {
-        return en.name === field.type
-      }
-
-      function enumNameIsNestedEnumName (en) {
-        return en.name === nestedEnumName
-      }
-
-      if (field.options && field.options.packed === 'true') {
-        if (PACKABLE_TYPES.indexOf(field.type) === -1) {
-          // let's see if it's an enum
-          if (field.type.indexOf('.') === -1) {
-            if (msg.enums && msg.enums.some(enumNameIsFieldType)) {
-              return
-            }
-          } else {
-            fieldSplit = field.type.split('.')
-            if (fieldSplit.length > 2) {
-              throw new Error('what is this?')
-            }
-
-            messageName = fieldSplit[0]
-            nestedEnumName = fieldSplit[1]
-
-            schema.messages.some(function (msg) {
-              if (msg.name === messageName) {
-                message = msg
-                return msg
-              }
-            })
-
-            if (message && message.enums && message.enums.some(enumNameIsNestedEnumName)) {
-              return
-            }
-          }
-
-          throw new Error(
-            'Fields of type ' + field.type + ' cannot be declared [packed=true]. ' +
-            'Only repeated fields of primitive numeric types (types which use ' +
-            'the varint, 32-bit, or 64-bit wire types) can be declared "packed". ' +
-            'See https://developers.google.com/protocol-buffers/docs/encoding#optional'
-          )
-        }
-      }
-    })
-  })
-
-  return schema
-}
-
-module.exports = parse
+// Set up buffer utility according to the environment
+configure();
 
 
 /***/ }),
 
-/***/ 8909:
-/***/ ((module) => {
-
-var onfield = function (f, result) {
-  var prefix = f.repeated ? 'repeated' : f.required ? 'required' : 'optional'
-  if (f.type === 'map') prefix = 'map<' + f.map.from + ',' + f.map.to + '>'
-  if (f.oneof) prefix = ''
-
-  var opts = Object.keys(f.options || {}).map(function (key) {
-    return key + ' = ' + f.options[key]
-  }).join(',')
-
-  if (opts) opts = ' [' + opts + ']'
-
-  result.push((prefix ? prefix + ' ' : '') + (f.map === 'map' ? '' : f.type + ' ') + f.name + ' = ' + f.tag + opts + ';')
-  return result
-}
-
-var onmessage = function (m, result) {
-  result.push('message ' + m.name + ' {')
-
-  if (!m.options) m.options = {}
-  onoption(m.options, result)
-
-  if (!m.enums) m.enums = []
-  m.enums.forEach(function (e) {
-    result.push(onenum(e, []))
-  })
-
-  if (!m.messages) m.messages = []
-  m.messages.forEach(function (m) {
-    result.push(onmessage(m, []))
-  })
-
-  var oneofs = {}
-
-  if (!m.fields) m.fields = []
-  m.fields.forEach(function (f) {
-    if (f.oneof) {
-      if (!oneofs[f.oneof]) oneofs[f.oneof] = []
-      oneofs[f.oneof].push(onfield(f, []))
-    } else {
-      result.push(onfield(f, []))
-    }
-  })
-
-  Object.keys(oneofs).forEach(function (n) {
-    oneofs[n].unshift('oneof ' + n + ' {')
-    oneofs[n].push('}')
-    result.push(oneofs[n])
-  })
-
-  result.push('}', '')
-  return result
-}
-
-var onenum = function (e, result) {
-  result.push('enum ' + e.name + ' {')
-  if (!e.options) e.options = {}
-  var options = onoption(e.options, [])
-  if (options.length > 1) {
-    result.push(options.slice(0, -1))
-  }
-  Object.keys(e.values).map(function (v) {
-    var val = onenumvalue(e.values[v])
-    result.push([v + ' = ' + val + ';'])
-  })
-  result.push('}', '')
-  return result
-}
-
-var onenumvalue = function (v, result) {
-  var opts = Object.keys(v.options || {}).map(function (key) {
-    return key + ' = ' + v.options[key]
-  }).join(',')
-
-  if (opts) opts = ' [' + opts + ']'
-  var val = v.value + opts
-  return val
-}
-
-var onoption = function (o, result) {
-  var keys = Object.keys(o)
-  keys.forEach(function (option) {
-    var v = o[option]
-    if (~option.indexOf('.')) option = '(' + option + ')'
-
-    var type = typeof v
-
-    if (type === 'object') {
-      v = onoptionMap(v, [])
-      if (v.length) result.push('option ' + option + ' = {', v, '};')
-    } else {
-      if (type === 'string' && option !== 'optimize_for') v = '"' + v + '"'
-      result.push('option ' + option + ' = ' + v + ';')
-    }
-  })
-  if (keys.length > 0) {
-    result.push('')
-  }
-
-  return result
-}
-
-var onoptionMap = function (o, result) {
-  var keys = Object.keys(o)
-  keys.forEach(function (k) {
-    var v = o[k]
-
-    var type = typeof v
-
-    if (type === 'object') {
-      if (Array.isArray(v)) {
-        v.forEach(function (v) {
-          v = onoptionMap(v, [])
-          if (v.length) result.push(k + ' {', v, '}')
-        })
-      } else {
-        v = onoptionMap(v, [])
-        if (v.length) result.push(k + ' {', v, '}')
-      }
-    } else {
-      if (type === 'string') v = '"' + v + '"'
-      result.push(k + ': ' + v)
-    }
-  })
-
-  return result
-}
-
-var onservices = function (s, result) {
-  result.push('service ' + s.name + ' {')
-
-  if (!s.options) s.options = {}
-  onoption(s.options, result)
-  if (!s.methods) s.methods = []
-  s.methods.forEach(function (m) {
-    result.push(onrpc(m, []))
-  })
-
-  result.push('}', '')
-  return result
-}
-
-var onrpc = function (rpc, result) {
-  var def = 'rpc ' + rpc.name + '('
-  if (rpc.client_streaming) def += 'stream '
-  def += rpc.input_type + ') returns ('
-  if (rpc.server_streaming) def += 'stream '
-  def += rpc.output_type + ')'
-
-  if (!rpc.options) rpc.options = {}
-
-  var options = onoption(rpc.options, [])
-  if (options.length > 1) {
-    result.push(def + ' {', options.slice(0, -1), '}')
-  } else {
-    result.push(def + ';')
-  }
-
-  return result
-}
-
-var indent = function (lvl) {
-  return function (line) {
-    if (Array.isArray(line)) return line.map(indent(lvl + '  ')).join('\n')
-    return lvl + line
-  }
-}
-
-module.exports = function (schema) {
-  var result = []
-
-  result.push('syntax = "proto' + schema.syntax + '";', '')
-
-  if (schema.package) result.push('package ' + schema.package + ';', '')
-
-  if (!schema.options) schema.options = {}
-
-  onoption(schema.options, result)
-
-  if (!schema.enums) schema.enums = []
-  schema.enums.forEach(function (e) {
-    onenum(e, result)
-  })
-
-  if (!schema.messages) schema.messages = []
-  schema.messages.forEach(function (m) {
-    onmessage(m, result)
-  })
-
-  if (schema.services) {
-    schema.services.forEach(function (s) {
-      onservices(s, result)
-    })
-  }
-  return result.map(indent('')).join('\n')
-}
-
-
-/***/ }),
-
-/***/ 6234:
-/***/ ((module) => {
-
-module.exports = function (sch) {
-  var noComments = function (line) {
-    var i = line.indexOf('//')
-    return i > -1 ? line.slice(0, i) : line
-  }
-
-  var noMultilineComments = function () {
-    var inside = false
-    return function (token) {
-      if (token === '/*') {
-        inside = true
-        return false
-      }
-      if (token === '*/') {
-        inside = false
-        return false
-      }
-      return !inside
-    }
-  }
-
-  var trim = function (line) {
-    return line.trim()
-  }
-
-  var removeQuotedLines = function (list) {
-    return function (str) {
-      var s = '$' + list.length + '$'
-      list.push(str)
-      return s
-    }
-  }
-
-  var restoreQuotedLines = function (list) {
-    var re = /^\$(\d+)\$$/
-    return function (line) {
-      var m = line.match(re)
-      return m ? list[+m[1]] : line
-    }
-  }
-
-  var replacements = []
-  return sch
-    .replace(/"(\\"|[^"\n])*?"|'(\\'|[^'\n])*?'/gm, removeQuotedLines(replacements))
-    .replace(/([;,{}()=:[\]<>]|\/\*|\*\/)/g, ' $1 ')
-    .split(/\n/)
-    .map(trim)
-    .filter(Boolean)
-    .map(noComments)
-    .map(trim)
-    .filter(Boolean)
-    .join('\n')
-    .split(/\s+|\n+/gm)
-    .filter(noMultilineComments())
-    .map(restoreQuotedLines(replacements))
-}
-
-
-/***/ }),
-
-/***/ 1914:
+/***/ 1011:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
+module.exports = Reader;
 
-const { encodeText } = __nccwpck_require__(4358)
+var util      = __nccwpck_require__(1241);
 
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import("./types").BaseName} BaseName */
-/** @typedef {import("./types").BaseCode} BaseCode */
+var BufferReader; // cyclic
 
-/**
- * Class to encode/decode in the supported Bases
- *
- */
-class Base {
-  /**
-   * @param {BaseName} name
-   * @param {BaseCode} code
-   * @param {CodecFactory} factory
-   * @param {string} alphabet
-   */
-  constructor (name, code, factory, alphabet) {
-    this.name = name
-    this.code = code
-    this.codeBuf = encodeText(this.code)
-    this.alphabet = alphabet
-    this.codec = factory(alphabet)
-  }
+var LongBits  = util.LongBits,
+    utf8      = util.utf8;
 
-  /**
-   * @param {Uint8Array} buf
-   * @returns {string}
-   */
-  encode (buf) {
-    return this.codec.encode(buf)
-  }
-
-  /**
-   * @param {string} string
-   * @returns {Uint8Array}
-   */
-  decode (string) {
-    for (const char of string) {
-      if (this.alphabet && this.alphabet.indexOf(char) < 0) {
-        throw new Error(`invalid character '${char}' in '${string}'`)
-      }
-    }
-    return this.codec.decode(string)
-  }
-}
-
-module.exports = Base
-
-
-/***/ }),
-
-/***/ 6898:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const baseX = __nccwpck_require__(3841)
-const Base = __nccwpck_require__(1914)
-const { rfc4648 } = __nccwpck_require__(7539)
-const { decodeText, encodeText } = __nccwpck_require__(4358)
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-/** @typedef {import('./types').Codec} Codec */
-/** @typedef {import('./types').BaseName} BaseName */
-/** @typedef {import('./types').BaseCode} BaseCode */
-
-/** @type {CodecFactory} */
-const identity = () => {
-  return {
-    encode: decodeText,
-    decode: encodeText
-  }
+/* istanbul ignore next */
+function indexOutOfRange(reader, writeLength) {
+    return RangeError("index out of range: " + reader.pos + " + " + (writeLength || 1) + " > " + reader.len);
 }
 
 /**
- *
- * name, code, implementation, alphabet
- *
- * @type {Array<[BaseName, BaseCode, CodecFactory, string]>}
+ * Constructs a new reader instance using the specified buffer.
+ * @classdesc Wire format reader using `Uint8Array` if available, otherwise `Array`.
+ * @constructor
+ * @param {Uint8Array} buffer Buffer to read from
  */
-const constants = [
-  ['identity', '\x00', identity, ''],
-  ['base2', '0', rfc4648(1), '01'],
-  ['base8', '7', rfc4648(3), '01234567'],
-  ['base10', '9', baseX, '0123456789'],
-  ['base16', 'f', rfc4648(4), '0123456789abcdef'],
-  ['base16upper', 'F', rfc4648(4), '0123456789ABCDEF'],
-  ['base32hex', 'v', rfc4648(5), '0123456789abcdefghijklmnopqrstuv'],
-  ['base32hexupper', 'V', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV'],
-  ['base32hexpad', 't', rfc4648(5), '0123456789abcdefghijklmnopqrstuv='],
-  ['base32hexpadupper', 'T', rfc4648(5), '0123456789ABCDEFGHIJKLMNOPQRSTUV='],
-  ['base32', 'b', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567'],
-  ['base32upper', 'B', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'],
-  ['base32pad', 'c', rfc4648(5), 'abcdefghijklmnopqrstuvwxyz234567='],
-  ['base32padupper', 'C', rfc4648(5), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567='],
-  ['base32z', 'h', rfc4648(5), 'ybndrfg8ejkmcpqxot1uwisza345h769'],
-  ['base36', 'k', baseX, '0123456789abcdefghijklmnopqrstuvwxyz'],
-  ['base36upper', 'K', baseX, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
-  ['base58btc', 'z', baseX, '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'],
-  ['base58flickr', 'Z', baseX, '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'],
-  ['base64', 'm', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'],
-  ['base64pad', 'M', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='],
-  ['base64url', 'u', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'],
-  ['base64urlpad', 'U', rfc4648(6), 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=']
-]
+function Reader(buffer) {
 
-/** @type {Record<BaseName,Base>} */
-const names = constants.reduce((prev, tupple) => {
-  prev[tupple[0]] = new Base(tupple[0], tupple[1], tupple[2], tupple[3])
-  return prev
-}, /** @type {Record<BaseName,Base>} */({}))
-
-/** @type {Record<BaseCode,Base>} */
-const codes = constants.reduce((prev, tupple) => {
-  prev[tupple[1]] = names[tupple[0]]
-  return prev
-}, /** @type {Record<BaseCode,Base>} */({}))
-
-module.exports = {
-  names,
-  codes
-}
-
-
-/***/ }),
-
-/***/ 7539:
-/***/ ((module) => {
-
-"use strict";
-
-
-/** @typedef {import('./types').CodecFactory} CodecFactory */
-
-/**
- * @param {string} string
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {Uint8Array}
- */
-const decode = (string, alphabet, bitsPerChar) => {
-  // Build the character lookup table:
-  /** @type {Record<string, number>} */
-  const codes = {}
-  for (let i = 0; i < alphabet.length; ++i) {
-    codes[alphabet[i]] = i
-  }
-
-  // Count the padding bytes:
-  let end = string.length
-  while (string[end - 1] === '=') {
-    --end
-  }
-
-  // Allocate the output:
-  const out = new Uint8Array((end * bitsPerChar / 8) | 0)
-
-  // Parse the data:
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  let written = 0 // Next byte to write
-  for (let i = 0; i < end; ++i) {
-    // Read one character from the string:
-    const value = codes[string[i]]
-    if (value === undefined) {
-      throw new SyntaxError('Invalid character ' + string[i])
-    }
-
-    // Append the bits to the buffer:
-    buffer = (buffer << bitsPerChar) | value
-    bits += bitsPerChar
-
-    // Write out some bits if the buffer has a byte's worth:
-    if (bits >= 8) {
-      bits -= 8
-      out[written++] = 0xff & (buffer >> bits)
-    }
-  }
-
-  // Verify that we have received just enough bits:
-  if (bits >= bitsPerChar || 0xff & (buffer << (8 - bits))) {
-    throw new SyntaxError('Unexpected end of data')
-  }
-
-  return out
-}
-
-/**
- * @param {Uint8Array} data
- * @param {string} alphabet
- * @param {number} bitsPerChar
- * @returns {string}
- */
-const encode = (data, alphabet, bitsPerChar) => {
-  const pad = alphabet[alphabet.length - 1] === '='
-  const mask = (1 << bitsPerChar) - 1
-  let out = ''
-
-  let bits = 0 // Number of bits currently in the buffer
-  let buffer = 0 // Bits waiting to be written out, MSB first
-  for (let i = 0; i < data.length; ++i) {
-    // Slurp data into the buffer:
-    buffer = (buffer << 8) | data[i]
-    bits += 8
-
-    // Write out as much as we can:
-    while (bits > bitsPerChar) {
-      bits -= bitsPerChar
-      out += alphabet[mask & (buffer >> bits)]
-    }
-  }
-
-  // Partial character:
-  if (bits) {
-    out += alphabet[mask & (buffer << (bitsPerChar - bits))]
-  }
-
-  // Add padding characters until we hit a byte boundary:
-  if (pad) {
-    while ((out.length * bitsPerChar) & 7) {
-      out += '='
-    }
-  }
-
-  return out
-}
-
-/**
- * RFC4648 Factory
- *
- * @param {number} bitsPerChar
- * @returns {CodecFactory}
- */
-const rfc4648 = (bitsPerChar) => (alphabet) => {
-  return {
     /**
-     * @param {Uint8Array} input
-     * @returns {string}
+     * Read buffer.
+     * @type {Uint8Array}
      */
-    encode (input) {
-      return encode(input, alphabet, bitsPerChar)
-    },
+    this.buf = buffer;
+
     /**
-     * @param {string} input
-     * @returns {Uint8Array}
+     * Read buffer position.
+     * @type {number}
      */
-    decode (input) {
-      return decode(input, alphabet, bitsPerChar)
+    this.pos = 0;
+
+    /**
+     * Read buffer length.
+     * @type {number}
+     */
+    this.len = buffer.length;
+}
+
+var create_array = typeof Uint8Array !== "undefined"
+    ? function create_typed_array(buffer) {
+        if (buffer instanceof Uint8Array || Array.isArray(buffer))
+            return new Reader(buffer);
+        throw Error("illegal buffer");
     }
-  }
-}
+    /* istanbul ignore next */
+    : function create_array(buffer) {
+        if (Array.isArray(buffer))
+            return new Reader(buffer);
+        throw Error("illegal buffer");
+    };
 
-module.exports = { rfc4648 }
-
-
-/***/ }),
-
-/***/ 4358:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-// @ts-ignore
-const { TextEncoder, TextDecoder } = __nccwpck_require__(2287)
-
-const textDecoder = new TextDecoder()
-/**
- * @param {ArrayBufferView|ArrayBuffer} bytes
- * @returns {string}
- */
-const decodeText = (bytes) => textDecoder.decode(bytes)
-
-const textEncoder = new TextEncoder()
-/**
- * @param {string} text
- * @returns {Uint8Array}
- */
-const encodeText = (text) => textEncoder.encode(text)
-
-/**
- * Returns a new Uint8Array created by concatenating the passed Arrays
- *
- * @param {Array<ArrayLike<number>>} arrs
- * @param {number} length
- * @returns {Uint8Array}
- */
-function concat (arrs, length) {
-  const output = new Uint8Array(length)
-  let offset = 0
-
-  for (const arr of arrs) {
-    output.set(arr, offset)
-    offset += arr.length
-  }
-
-  return output
-}
-
-module.exports = { decodeText, encodeText, concat }
-
-
-/***/ }),
-
-/***/ 4104:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(6898)
-const { TextEncoder } = __nccwpck_require__(2287)
-const utf8Encoder = new TextEncoder()
-
-/**
- * Interperets each character in a string as a byte and
- * returns a Uint8Array of those bytes.
- *
- * @param {String} string The string to turn into an array
- * @returns {Uint8Array}
- */
-function asciiStringToUint8Array (string) {
-  const array = new Uint8Array(string.length)
-
-  for (let i = 0; i < string.length; i++) {
-    array[i] = string.charCodeAt(i)
-  }
-
-  return array
-}
-
-/**
- * Create a `Uint8Array` from the passed string
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {String} string
- * @param {String} [encoding=utf8] utf8, base16, base64, base64urlpad, etc
- * @returns {Uint8Array}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function fromString (string, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Encoder.encode(string)
-  }
-
-  if (encoding === 'ascii') {
-    return asciiStringToUint8Array(string)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.decode(string)
-}
-
-module.exports = fromString
-
-
-/***/ }),
-
-/***/ 5965:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const { names } = __nccwpck_require__(6898)
-const { TextDecoder } = __nccwpck_require__(2287)
-const utf8Decoder = new TextDecoder('utf8')
-
-/**
- * Turns a Uint8Array of bytes into a string with each
- * character being the char code of the corresponding byte
- *
- * @param {Uint8Array} array The array to turn into a string
- * @returns {String}
- */
-function uint8ArrayToAsciiString (array) {
-  let string = ''
-
-  for (let i = 0; i < array.length; i++) {
-    string += String.fromCharCode(array[i])
-  }
-  return string
-}
-
-/**
- * Turns a `Uint8Array` into a string.
- *
- * Supports `utf8`, `utf-8` and any encoding supported by the multibase module.
- *
- * Also `ascii` which is similar to node's 'binary' encoding.
- *
- * @param {Uint8Array} array The array to turn into a string
- * @param {String} [encoding=utf8] The encoding to use
- * @returns {String}
- * @see {@link https://www.npmjs.com/package/multibase|multibase} for supported encodings other than `utf8`
- */
-function toString (array, encoding = 'utf8') {
-  if (encoding === 'utf8' || encoding === 'utf-8') {
-    return utf8Decoder.decode(array)
-  }
-
-  if (encoding === 'ascii') {
-    return uint8ArrayToAsciiString(array)
-  }
-
-  const codec = names[encoding]
-
-  if (!codec) {
-    throw new Error('Unknown base')
-  }
-
-  return codec.encode(array)
-}
-
-module.exports = toString
-
-
-/***/ }),
-
-/***/ 3822:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-/* eslint max-depth: 1 */
-
-
-const varint = __nccwpck_require__(8018)
-const defined = __nccwpck_require__(5693)/* .defined */ .r
-
-function toSentenceCase (string) {
-  return `${string.substring(0, 1).toUpperCase()}${string.substring(1)}`
-}
-
-function addPropertyAccessors (obj, name, value, defaultValue) {
-  if (Object.prototype.hasOwnProperty.call(obj, name)) {
-    // have already added this property
-    return
-  }
-
-  const sentenceCaseName = toSentenceCase(name)
-
-  Object.defineProperties(obj, {
-    [name]: {
-      enumerable: true,
-      configurable: true,
-      set: (val) => {
-        value = val
-      },
-      get: () => {
-        if (value === undefined) {
-          return defaultValue
+var create = function create() {
+    return util.Buffer
+        ? function create_buffer_setup(buffer) {
+            return (Reader.create = function create_buffer(buffer) {
+                return util.Buffer.isBuffer(buffer)
+                    ? new BufferReader(buffer)
+                    /* istanbul ignore next */
+                    : create_array(buffer);
+            })(buffer);
         }
+        /* istanbul ignore next */
+        : create_array;
+};
 
-        return value
-      }
-    },
-    [`has${sentenceCaseName}`]: {
-      configurable: true,
-      value: () => {
-        return value !== undefined
-      }
-    },
-    [`set${sentenceCaseName}`]: {
-      configurable: true,
-      value: (val) => {
-        value = val
-      }
-    },
-    [`get${sentenceCaseName}`]: {
-      configurable: true,
-      value: () => {
-        return value
-      }
-    },
-    [`clear${sentenceCaseName}`]: {
-      configurable: true,
-      value: () => {
-        value = undefined
-        obj[name] = undefined
-      }
-    }
-  })
-}
+/**
+ * Creates a new reader using the specified buffer.
+ * @function
+ * @param {Uint8Array|Buffer} buffer Buffer to read from
+ * @returns {Reader|BufferReader} A {@link BufferReader} if `buffer` is a Buffer, otherwise a {@link Reader}
+ * @throws {Error} If `buffer` is not a valid buffer
+ */
+Reader.create = create();
 
-function compileDecode (m, resolve, enc) {
-  const requiredFields = []
-  const fields = {}
-  const oneofFields = []
-  const vals = []
+Reader.prototype._slice = util.Array.prototype.subarray || /* istanbul ignore next */ util.Array.prototype.slice;
 
-  for (var i = 0; i < enc.length; i++) {
-    const field = m.fields[i]
+/**
+ * Reads a varint as an unsigned 32 bit value.
+ * @function
+ * @returns {number} Value read
+ */
+Reader.prototype.uint32 = (function read_uint32_setup() {
+    var value = 4294967295; // optimizer type-hint, tends to deopt otherwise (?!)
+    return function read_uint32() {
+        value = (         this.buf[this.pos] & 127       ) >>> 0; if (this.buf[this.pos++] < 128) return value;
+        value = (value | (this.buf[this.pos] & 127) <<  7) >>> 0; if (this.buf[this.pos++] < 128) return value;
+        value = (value | (this.buf[this.pos] & 127) << 14) >>> 0; if (this.buf[this.pos++] < 128) return value;
+        value = (value | (this.buf[this.pos] & 127) << 21) >>> 0; if (this.buf[this.pos++] < 128) return value;
+        value = (value | (this.buf[this.pos] &  15) << 28) >>> 0; if (this.buf[this.pos++] < 128) return value;
 
-    fields[field.tag] = i
-
-    const def = field.options && field.options.default
-    const resolved = resolve(field.type, m.id, false)
-    vals[i] = [def, resolved && resolved.values]
-
-    m.fields[i].packed = field.repeated && field.options && field.options.packed && field.options.packed !== 'false'
-
-    if (field.required) {
-      requiredFields.push(field.name)
-    }
-
-    if (field.oneof) {
-      oneofFields.push(field.name)
-    }
-  }
-
-  function decodeField (e, field, obj, buf, dataView, offset, i) {
-    const name = field.name
-
-    if (field.oneof) {
-      // clear already defined oneof fields
-      const props = Object.keys(obj)
-      for (var j = 0; j < props.length; j++) {
-        if (oneofFields.indexOf(props[j]) > -1) {
-          const sentenceCase = toSentenceCase(props[j])
-          delete obj[`has${sentenceCase}`]
-          delete obj[`get${sentenceCase}`]
-          delete obj[`set${sentenceCase}`]
-          delete obj[`clear${sentenceCase}`]
-          delete obj[props[j]]
+        /* istanbul ignore if */
+        if ((this.pos += 5) > this.len) {
+            this.pos = this.len;
+            throw indexOutOfRange(this, 10);
         }
-      }
-    }
+        return value;
+    };
+})();
 
-    let value
+/**
+ * Reads a varint as a signed 32 bit value.
+ * @returns {number} Value read
+ */
+Reader.prototype.int32 = function read_int32() {
+    return this.uint32() | 0;
+};
 
-    if (e.message) {
-      const len = varint.decode(buf, offset)
-      offset += varint.decode.bytes
+/**
+ * Reads a zig-zag encoded varint as a signed 32 bit value.
+ * @returns {number} Value read
+ */
+Reader.prototype.sint32 = function read_sint32() {
+    var value = this.uint32();
+    return value >>> 1 ^ -(value & 1) | 0;
+};
 
-      const decoded = e.decode(buf, dataView, offset, offset + len)
+/* eslint-disable no-invalid-this */
 
-      if (field.map) {
-        value = obj[name] || {}
-        value[decoded.key] = decoded.value
-      } else if (field.repeated) {
-        value = obj[name] || []
-        value.push(decoded)
-      } else {
-        value = decoded
-      }
+function readLongVarint() {
+    // tends to deopt with local vars for octet etc.
+    var bits = new LongBits(0, 0);
+    var i = 0;
+    if (this.len - this.pos > 4) { // fast route (lo)
+        for (; i < 4; ++i) {
+            // 1st..4th
+            bits.lo = (bits.lo | (this.buf[this.pos] & 127) << i * 7) >>> 0;
+            if (this.buf[this.pos++] < 128)
+                return bits;
+        }
+        // 5th
+        bits.lo = (bits.lo | (this.buf[this.pos] & 127) << 28) >>> 0;
+        bits.hi = (bits.hi | (this.buf[this.pos] & 127) >>  4) >>> 0;
+        if (this.buf[this.pos++] < 128)
+            return bits;
+        i = 0;
     } else {
-      if (field.repeated) {
-        value = obj[name] || []
-        value.push(e.decode(buf, dataView, offset))
-      } else {
-        value = e.decode(buf, dataView, offset)
-      }
-    }
-
-    addPropertyAccessors(obj, name, value)
-
-    offset += e.decode.bytes
-
-    return offset
-  }
-
-  return function decode (buf, view, offset, end) {
-    if (offset == null) {
-      offset = 0
-    }
-
-    if (end == null) {
-      end = buf.length
-    }
-
-    if (!(end <= buf.length && offset <= buf.length)) {
-      throw new Error('Decoded message is not valid')
-    }
-
-    if (!view) {
-      view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
-    }
-
-    var oldOffset = offset
-    var obj = {}
-    var field
-
-    while (true) {
-      if (end <= offset) {
-        // finished
-
-        // check required methods
-        var name = ''
-        var j = 0
-        for (j = 0; j < requiredFields.length; j++) {
-          name = requiredFields[j]
-          if (!defined(obj[name])) {
-            throw new Error('Decoded message is not valid, missing required field: ' + name)
-          }
+        for (; i < 3; ++i) {
+            /* istanbul ignore if */
+            if (this.pos >= this.len)
+                throw indexOutOfRange(this);
+            // 1st..3th
+            bits.lo = (bits.lo | (this.buf[this.pos] & 127) << i * 7) >>> 0;
+            if (this.buf[this.pos++] < 128)
+                return bits;
         }
+        // 4th
+        bits.lo = (bits.lo | (this.buf[this.pos++] & 127) << i * 7) >>> 0;
+        return bits;
+    }
+    if (this.len - this.pos > 4) { // fast route (hi)
+        for (; i < 5; ++i) {
+            // 6th..10th
+            bits.hi = (bits.hi | (this.buf[this.pos] & 127) << i * 7 + 3) >>> 0;
+            if (this.buf[this.pos++] < 128)
+                return bits;
+        }
+    } else {
+        for (; i < 5; ++i) {
+            /* istanbul ignore if */
+            if (this.pos >= this.len)
+                throw indexOutOfRange(this);
+            // 6th..10th
+            bits.hi = (bits.hi | (this.buf[this.pos] & 127) << i * 7 + 3) >>> 0;
+            if (this.buf[this.pos++] < 128)
+                return bits;
+        }
+    }
+    /* istanbul ignore next */
+    throw Error("invalid varint encoding");
+}
 
-        // fill out missing defaults
-        var val
-        var def
-        for (j = 0; j < enc.length; j++) {
-          field = m.fields[j]
-          def = vals[j][0]
-          val = vals[j][1]
-          name = field.name
-          let defaultVal
+/* eslint-enable no-invalid-this */
 
-          if (Object.prototype.hasOwnProperty.call(obj, name)) {
-            continue
-          }
+/**
+ * Reads a varint as a signed 64 bit value.
+ * @name Reader#int64
+ * @function
+ * @returns {Long} Value read
+ */
 
-          var done = false
+/**
+ * Reads a varint as an unsigned 64 bit value.
+ * @name Reader#uint64
+ * @function
+ * @returns {Long} Value read
+ */
 
-          if (field.oneof) {
-            var props = Object.keys(obj)
+/**
+ * Reads a zig-zag encoded varint as a signed 64 bit value.
+ * @name Reader#sint64
+ * @function
+ * @returns {Long} Value read
+ */
 
-            for (var k = 0; k < props.length; k++) {
-              if (oneofFields.indexOf(props[k]) > -1) {
-                done = true
-                break
-              }
+/**
+ * Reads a varint as a boolean.
+ * @returns {boolean} Value read
+ */
+Reader.prototype.bool = function read_bool() {
+    return this.uint32() !== 0;
+};
+
+function readFixed32_end(buf, end) { // note that this uses `end`, not `pos`
+    return (buf[end - 4]
+          | buf[end - 3] << 8
+          | buf[end - 2] << 16
+          | buf[end - 1] << 24) >>> 0;
+}
+
+/**
+ * Reads fixed 32 bits as an unsigned 32 bit integer.
+ * @returns {number} Value read
+ */
+Reader.prototype.fixed32 = function read_fixed32() {
+
+    /* istanbul ignore if */
+    if (this.pos + 4 > this.len)
+        throw indexOutOfRange(this, 4);
+
+    return readFixed32_end(this.buf, this.pos += 4);
+};
+
+/**
+ * Reads fixed 32 bits as a signed 32 bit integer.
+ * @returns {number} Value read
+ */
+Reader.prototype.sfixed32 = function read_sfixed32() {
+
+    /* istanbul ignore if */
+    if (this.pos + 4 > this.len)
+        throw indexOutOfRange(this, 4);
+
+    return readFixed32_end(this.buf, this.pos += 4) | 0;
+};
+
+/* eslint-disable no-invalid-this */
+
+function readFixed64(/* this: Reader */) {
+
+    /* istanbul ignore if */
+    if (this.pos + 8 > this.len)
+        throw indexOutOfRange(this, 8);
+
+    return new LongBits(readFixed32_end(this.buf, this.pos += 4), readFixed32_end(this.buf, this.pos += 4));
+}
+
+/* eslint-enable no-invalid-this */
+
+/**
+ * Reads fixed 64 bits.
+ * @name Reader#fixed64
+ * @function
+ * @returns {Long} Value read
+ */
+
+/**
+ * Reads zig-zag encoded fixed 64 bits.
+ * @name Reader#sfixed64
+ * @function
+ * @returns {Long} Value read
+ */
+
+/**
+ * Reads a float (32 bit) as a number.
+ * @function
+ * @returns {number} Value read
+ */
+Reader.prototype.float = function read_float() {
+
+    /* istanbul ignore if */
+    if (this.pos + 4 > this.len)
+        throw indexOutOfRange(this, 4);
+
+    var value = util.float.readFloatLE(this.buf, this.pos);
+    this.pos += 4;
+    return value;
+};
+
+/**
+ * Reads a double (64 bit float) as a number.
+ * @function
+ * @returns {number} Value read
+ */
+Reader.prototype.double = function read_double() {
+
+    /* istanbul ignore if */
+    if (this.pos + 8 > this.len)
+        throw indexOutOfRange(this, 4);
+
+    var value = util.float.readDoubleLE(this.buf, this.pos);
+    this.pos += 8;
+    return value;
+};
+
+/**
+ * Reads a sequence of bytes preceeded by its length as a varint.
+ * @returns {Uint8Array} Value read
+ */
+Reader.prototype.bytes = function read_bytes() {
+    var length = this.uint32(),
+        start  = this.pos,
+        end    = this.pos + length;
+
+    /* istanbul ignore if */
+    if (end > this.len)
+        throw indexOutOfRange(this, length);
+
+    this.pos += length;
+    if (Array.isArray(this.buf)) // plain array
+        return this.buf.slice(start, end);
+    return start === end // fix for IE 10/Win8 and others' subarray returning array of size 1
+        ? new this.buf.constructor(0)
+        : this._slice.call(this.buf, start, end);
+};
+
+/**
+ * Reads a string preceeded by its byte length as a varint.
+ * @returns {string} Value read
+ */
+Reader.prototype.string = function read_string() {
+    var bytes = this.bytes();
+    return utf8.read(bytes, 0, bytes.length);
+};
+
+/**
+ * Skips the specified number of bytes if specified, otherwise skips a varint.
+ * @param {number} [length] Length if known, otherwise a varint is assumed
+ * @returns {Reader} `this`
+ */
+Reader.prototype.skip = function skip(length) {
+    if (typeof length === "number") {
+        /* istanbul ignore if */
+        if (this.pos + length > this.len)
+            throw indexOutOfRange(this, length);
+        this.pos += length;
+    } else {
+        do {
+            /* istanbul ignore if */
+            if (this.pos >= this.len)
+                throw indexOutOfRange(this);
+        } while (this.buf[this.pos++] & 128);
+    }
+    return this;
+};
+
+/**
+ * Skips the next element of the specified wire type.
+ * @param {number} wireType Wire type received
+ * @returns {Reader} `this`
+ */
+Reader.prototype.skipType = function(wireType) {
+    switch (wireType) {
+        case 0:
+            this.skip();
+            break;
+        case 1:
+            this.skip(8);
+            break;
+        case 2:
+            this.skip(this.uint32());
+            break;
+        case 3:
+            while ((wireType = this.uint32() & 7) !== 4) {
+                this.skipType(wireType);
             }
-          }
+            break;
+        case 5:
+            this.skip(4);
+            break;
 
-          if (done) {
-            continue
-          }
-
-          if (val) { // is enum
-            if (field.repeated) {
-              def = []
-            } else {
-              def = (def && val[def]) ? val[def].value : val[Object.keys(val)[0]].value
-              def = parseInt(def || 0, 10)
-            }
-          } else {
-            defaultVal = defaultValue(field)
-            def = coerceValue(field, def)
-          }
-
-          addPropertyAccessors(obj, name, def, defaultVal)
-        }
-
-        decode.bytes = offset - oldOffset
-        return obj
-      }
-
-      var prefix = varint.decode(buf, offset)
-      offset += varint.decode.bytes
-      var tag = prefix >> 3
-
-      var i = fields[tag]
-
-      if (i == null) {
-        offset = skip(prefix & 7, buf, view, offset)
-        continue
-      }
-
-      var e = enc[i]
-      field = m.fields[i]
-
-      if (field.packed) {
-        var packedEnd = varint.decode(buf, offset)
-        offset += varint.decode.bytes
-        packedEnd += offset
-
-        while (offset < packedEnd) {
-          offset = decodeField(e, field, obj, buf, view, offset, i)
-        }
-      } else {
-        offset = decodeField(e, field, obj, buf, view, offset, i)
-      }
+        /* istanbul ignore next */
+        default:
+            throw Error("invalid wire type " + wireType + " at offset " + this.pos);
     }
-  }
-}
+    return this;
+};
 
-var skip = function (type, buffer, view, offset) {
-  switch (type) {
-    case 0:
-      varint.decode(buffer, offset)
-      return offset + varint.decode.bytes
+Reader._configure = function(BufferReader_) {
+    BufferReader = BufferReader_;
+    Reader.create = create();
+    BufferReader._configure();
 
-    case 1:
-      return offset + 8
+    var fn = util.Long ? "toLong" : /* istanbul ignore next */ "toNumber";
+    util.merge(Reader.prototype, {
 
-    case 2:
-      var len = varint.decode(buffer, offset)
-      return offset + varint.decode.bytes + len
+        int64: function read_int64() {
+            return readLongVarint.call(this)[fn](false);
+        },
 
-    case 3:
-    case 4:
-      throw new Error('Groups are not supported')
+        uint64: function read_uint64() {
+            return readLongVarint.call(this)[fn](true);
+        },
 
-    case 5:
-      return offset + 4
-    default:
-      throw new Error('Unknown wire type: ' + type)
-  }
-}
+        sint64: function read_sint64() {
+            return readLongVarint.call(this).zzDecode()[fn](false);
+        },
 
-var defaultValue = function (f) {
-  if (f.map) return {}
-  if (f.repeated) return []
+        fixed64: function read_fixed64() {
+            return readFixed64.call(this)[fn](true);
+        },
 
-  switch (f.type) {
-    case 'string':
-      return ''
-    case 'bool':
-      return false
-    case 'float':
-    case 'double':
-    case 'sfixed32':
-    case 'fixed32':
-    case 'varint':
-    case 'enum':
-    case 'uint64':
-    case 'uint32':
-    case 'int64':
-    case 'int32':
-    case 'sint64':
-    case 'sint32':
-      return 0
-    default:
-      return null
-  }
-}
+        sfixed64: function read_sfixed64() {
+            return readFixed64.call(this)[fn](false);
+        }
 
-var coerceValue = function (f, def) {
-  if (def === undefined) {
-    return def
-  }
-
-  switch (f.type) {
-    case 'bool':
-      return def === 'true'
-    case 'float':
-    case 'double':
-    case 'sfixed32':
-    case 'fixed32':
-    case 'varint':
-    case 'enum':
-    case 'uint64':
-    case 'uint32':
-    case 'int64':
-    case 'int32':
-    case 'sint64':
-    case 'sint32':
-      return parseInt(def, 10)
-    default:
-      return def
-  }
-}
-
-module.exports = compileDecode
+    });
+};
 
 
 /***/ }),
 
-/***/ 5359:
+/***/ 339:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
+module.exports = BufferReader;
 
-var defined = __nccwpck_require__(5693)/* .defined */ .r
-var varint = __nccwpck_require__(8018)
+// extends Reader
+var Reader = __nccwpck_require__(1011);
+(BufferReader.prototype = Object.create(Reader.prototype)).constructor = BufferReader;
 
-function compileEncode (m, resolve, enc, oneofs, encodingLength) {
-  const oneofsKeys = Object.keys(oneofs)
-  const encLength = enc.length
-  const ints = {}
-  for (let i = 0; i < encLength; i++) {
-    ints[i] = {
-      p: varint.encode(m.fields[i].tag << 3 | 2),
-      h: varint.encode(m.fields[i].tag << 3 | enc[i].type)
-    }
+var util = __nccwpck_require__(1241);
 
-    const field = m.fields[i]
-    m.fields[i].packed = field.repeated && field.options && field.options.packed && field.options.packed !== 'false'
-  }
+/**
+ * Constructs a new buffer reader instance.
+ * @classdesc Wire format reader using node buffers.
+ * @extends Reader
+ * @constructor
+ * @param {Buffer} buffer Buffer to read from
+ */
+function BufferReader(buffer) {
+    Reader.call(this, buffer);
 
-  function encodeField (buf, view, offset, h, e, packed, innerVal) {
-    let j = 0
-    if (!packed) {
-      for (j = 0; j < h.length; j++) {
-        buf[offset++] = h[j]
-      }
-    }
-
-    if (e.message) {
-      varint.encode(e.encodingLength(innerVal), buf, offset)
-      offset += varint.encode.bytes
-    }
-
-    e.encode(innerVal, buf, view, offset)
-
-    return offset + e.encode.bytes
-  }
-
-  return function encode (obj, buf, view, offset = 0) {
-    if (buf == null) {
-      buf = new Uint8Array(encodingLength(obj))
-    }
-
-    if (view == null) {
-      view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
-    }
-
-    const oldOffset = offset
-    const objKeys = Object.keys(obj)
-    let i = 0
-
-    // oneof checks
-
-    let match = false
-    for (i = 0; i < oneofsKeys.length; i++) {
-      const name = oneofsKeys[i]
-      const prop = oneofs[i]
-      if (objKeys.indexOf(prop) > -1) {
-        if (match) {
-          throw new Error('only one of the properties defined in oneof ' + name + ' can be set')
-        }
-
-        match = true
-      }
-    }
-
-    for (i = 0; i < encLength; i++) {
-      const e = enc[i]
-      const field = m.fields[i] // was f
-      let val = obj[field.name]
-      let j = 0
-
-      if (!defined(val)) {
-        if (field.required) {
-          throw new Error(field.name + ' is required')
-        }
-        continue
-      }
-      const p = ints[i].p
-      const h = ints[i].h
-
-      const packed = field.packed
-
-      if (field.map) {
-        const tmp = Object.keys(val)
-        for (j = 0; j < tmp.length; j++) {
-          tmp[j] = {
-            key: tmp[j],
-            value: val[tmp[j]]
-          }
-        }
-        val = tmp
-      }
-
-      if (packed) {
-        let packedLen = 0
-        for (j = 0; j < val.length; j++) {
-          if (!Object.prototype.hasOwnProperty.call(val, j)) {
-            continue
-          }
-
-          packedLen += e.encodingLength(val[j])
-        }
-
-        if (packedLen) {
-          for (j = 0; j < h.length; j++) {
-            buf[offset++] = p[j]
-          }
-          varint.encode(packedLen, buf, offset)
-          offset += varint.encode.bytes
-        }
-      }
-
-      if (field.repeated) {
-        let innerVal
-        for (j = 0; j < val.length; j++) {
-          innerVal = val[j]
-          if (!defined(innerVal)) {
-            continue
-          }
-
-          offset = encodeField(buf, view, offset, h, e, packed, innerVal)
-        }
-      } else {
-        offset = encodeField(buf, view, offset, h, e, packed, val)
-      }
-    }
-
-    encode.bytes = offset - oldOffset
-    return buf
-  }
+    /**
+     * Read buffer.
+     * @name BufferReader#buf
+     * @type {Buffer}
+     */
 }
 
-module.exports = compileEncode
+BufferReader._configure = function () {
+    /* istanbul ignore else */
+    if (util.Buffer)
+        BufferReader.prototype._slice = util.Buffer.prototype.slice;
+};
+
+
+/**
+ * @override
+ */
+BufferReader.prototype.string = function read_string_buffer() {
+    var len = this.uint32(); // modifies pos
+    return this.buf.utf8Slice
+        ? this.buf.utf8Slice(this.pos, this.pos = Math.min(this.pos + len, this.len))
+        : this.buf.toString("utf-8", this.pos, this.pos = Math.min(this.pos + len, this.len));
+};
+
+/**
+ * Reads a sequence of bytes preceeded by its length as a varint.
+ * @name BufferReader#bytes
+ * @function
+ * @returns {Buffer} Value read
+ */
+
+BufferReader._configure();
 
 
 /***/ }),
 
-/***/ 4316:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var defined = __nccwpck_require__(5693)/* .defined */ .r
-var varint = __nccwpck_require__(8018)
-
-function compileEncodingLength (m, enc, oneofs) {
-  const oneofsKeys = Object.keys(oneofs)
-  const encLength = enc.length
-
-  const hls = new Array(encLength)
-
-  for (let i = 0; i < m.fields.length; i++) {
-    hls[i] = varint.encodingLength(m.fields[i].tag << 3 | enc[i].type)
-
-    const field = m.fields[i]
-    m.fields[i].packed = field.repeated && field.options && field.options.packed && field.options.packed !== 'false'
-  }
-
-  return function encodingLength (obj) {
-    let length = 0
-    let i = 0
-    let j = 0
-
-    for (i = 0; i < oneofsKeys.length; i++) {
-      const name = oneofsKeys[i]
-      const props = oneofs[name]
-
-      let match = false
-      for (j = 0; j < props.length; j++) {
-        if (defined(obj[props[j]])) {
-          if (match) {
-            throw new Error('only one of the properties defined in oneof ' + name + ' can be set')
-          }
-          match = true
-        }
-      }
-    }
-
-    for (i = 0; i < encLength; i++) {
-      const e = enc[i]
-      const field = m.fields[i]
-      let val = obj[field.name]
-      const hl = hls[i]
-      let len
-
-      if (!defined(val)) {
-        if (field.required) {
-          throw new Error(field.name + ' is required')
-        }
-
-        continue
-      }
-
-      if (field.map) {
-        const tmp = Object.keys(val)
-        for (j = 0; j < tmp.length; j++) {
-          tmp[j] = {
-            key: tmp[j],
-            value: val[tmp[j]]
-          }
-        }
-
-        val = tmp
-      }
-
-      if (field.packed) {
-        let packedLen = 0
-        for (j = 0; j < val.length; j++) {
-          if (!defined(val[j])) {
-            continue
-          }
-          len = e.encodingLength(val[j])
-          packedLen += len
-
-          if (e.message) {
-            packedLen += varint.encodingLength(len)
-          }
-        }
-
-        if (packedLen) {
-          length += hl + packedLen + varint.encodingLength(packedLen)
-        }
-      } else if (field.repeated) {
-        for (j = 0; j < val.length; j++) {
-          if (!defined(val[j])) {
-            continue
-          }
-
-          len = e.encodingLength(val[j])
-          length += hl + len + (e.message ? varint.encodingLength(len) : 0)
-        }
-      } else {
-        len = e.encodingLength(val)
-        length += hl + len + (e.message ? varint.encodingLength(len) : 0)
-      }
-    }
-
-    return length
-  }
-}
-
-module.exports = compileEncodingLength
-
-
-/***/ }),
-
-/***/ 17:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function boolEncodingLength () {
-  return 1
-}
-
-function boolEncode (value, buffer, dataView, offset) {
-  buffer[offset] = value ? 1 : 0
-  boolEncode.bytes = 1
-}
-
-function boolDecode (buffer, dataView, offset) {
-  const bool = buffer[offset] > 0
-  boolDecode.bytes = 1
-
-  return bool
-}
-
-module.exports = encoder(0, boolEncode, boolDecode, boolEncodingLength)
-
-
-/***/ }),
-
-/***/ 7648:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(8018)
-const encoder = __nccwpck_require__(6809)
-
-function bytesBufferLength (val) {
-  return val.byteLength
-}
-
-function bytesEncodingLength (val) {
-  const len = bytesBufferLength(val)
-  return varint.encodingLength(len) + len
-}
-
-function bytesEncode (val, buffer, dataView, offset) {
-  const oldOffset = offset
-  const len = bytesBufferLength(val)
-
-  varint.encode(len, buffer, offset)
-  offset += varint.encode.bytes
-
-  buffer.set(val, offset)
-  offset += len
-
-  bytesEncode.bytes = offset - oldOffset
-}
-
-function bytesDecode (buffer, dataView, offset) {
-  const oldOffset = offset
-
-  const len = varint.decode(buffer, offset)
-  offset += varint.decode.bytes
-
-  const val = buffer.slice(offset, offset + len)
-  offset += val.length
-
-  bytesDecode.bytes = offset - oldOffset
-
-  return val
-}
-
-module.exports = encoder(2, bytesEncode, bytesDecode, bytesEncodingLength)
-
-
-/***/ }),
-
-/***/ 1702:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function doubleEncodingLength () {
-  return 8
-}
-
-function doubleEncode (val, buffer, dataView, offset) {
-  dataView.setFloat64(offset, val, true)
-  doubleEncode.bytes = 8
-}
-
-function doubleDecode (buffer, dataView, offset) {
-  const val = dataView.getFloat64(offset, true)
-  doubleDecode.bytes = 8
-
-  return val
-}
-
-module.exports = encoder(1, doubleEncode, doubleDecode, doubleEncodingLength)
-
-
-/***/ }),
-
-/***/ 6809:
+/***/ 73:
 /***/ ((module) => {
 
 "use strict";
 
+module.exports = {};
 
-function encoder (type, encode, decode, encodingLength) {
-  encode.bytes = decode.bytes = 0
-
-  return {
-    type: type,
-    encode: encode,
-    decode: decode,
-    encodingLength: encodingLength
-  }
-}
-
-module.exports = encoder
-
-
-/***/ }),
-
-/***/ 9444:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function fixed32EncodingLength (val) {
-  return 4
-}
-
-function fixed32Encode (val, buffer, dataView, offset) {
-  dataView.setUint32(offset, val, true)
-  fixed32Encode.bytes = 4
-}
-
-function fixed32Decode (buffer, dataView, offset) {
-  const val = dataView.getUint32(offset, true)
-  fixed32Decode.bytes = 4
-
-  return val
-}
-
-module.exports = encoder(5, fixed32Encode, fixed32Decode, fixed32EncodingLength)
+/**
+ * Named roots.
+ * This is where pbjs stores generated structures (the option `-r, --root` specifies a name).
+ * Can also be used manually to make roots available accross modules.
+ * @name roots
+ * @type {Object.<string,Root>}
+ * @example
+ * // pbjs -r myroot -o compiled.js ...
+ *
+ * // in another module:
+ * require("./compiled.js");
+ *
+ * // in any subsequent module:
+ * var root = protobuf.roots["myroot"];
+ */
 
 
 /***/ }),
 
-/***/ 2994:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function fixed64EncodingLength () {
-  return 8
-}
-
-function fixed64Encode (val, buffer, dataView, offset) {
-  for (const byte of val) {
-    buffer[offset] = byte
-    offset++
-  }
-
-  fixed64Encode.bytes = 8
-}
-
-function fixed64Decode (buffer, dataView, offset) {
-  const val = buffer.slice(offset, offset + 8)
-  fixed64Decode.bytes = 8
-
-  return val
-}
-
-module.exports = encoder(1, fixed64Encode, fixed64Decode, fixed64EncodingLength)
-
-
-/***/ }),
-
-/***/ 2723:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function floatEncodingLength () {
-  return 4
-}
-
-function floatEncode (val, buffer, dataView, offset) {
-  dataView.setFloat32(offset, val, true)
-  floatEncode.bytes = 4
-}
-
-function floatDecode (buffer, dataView, offset) {
-  const val = dataView.getFloat32(offset, true)
-  floatDecode.bytes = 4
-
-  return val
-}
-
-module.exports = encoder(5, floatEncode, floatDecode, floatEncodingLength)
-
-
-/***/ }),
-
-/***/ 8595:
+/***/ 6444:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 
-exports.make = __nccwpck_require__(6809)
-exports.bytes = __nccwpck_require__(7648)
-exports.string = __nccwpck_require__(1038)
-exports.bool = __nccwpck_require__(17)
-exports.int32 = __nccwpck_require__(3474)
-exports.int64 = __nccwpck_require__(152)
-exports.sint32 =
-exports.sint64 = __nccwpck_require__(5139)
-exports.uint32 =
-exports.uint64 =
-exports.enum =
-exports.varint = __nccwpck_require__(3293)
+/**
+ * Streaming RPC helpers.
+ * @namespace
+ */
+var rpc = exports;
 
-// we cannot represent these in javascript so we just use buffers
-exports.fixed64 =
-exports.sfixed64 = __nccwpck_require__(2994)
-exports.double = __nccwpck_require__(1702)
-exports.fixed32 = __nccwpck_require__(9444)
-exports.sfixed32 = __nccwpck_require__(6239)
-exports.float = __nccwpck_require__(2723)
+/**
+ * RPC implementation passed to {@link Service#create} performing a service request on network level, i.e. by utilizing http requests or websockets.
+ * @typedef RPCImpl
+ * @type {function}
+ * @param {Method|rpc.ServiceMethod<Message<{}>,Message<{}>>} method Reflected or static method being called
+ * @param {Uint8Array} requestData Request data
+ * @param {RPCImplCallback} callback Callback function
+ * @returns {undefined}
+ * @example
+ * function rpcImpl(method, requestData, callback) {
+ *     if (protobuf.util.lcFirst(method.name) !== "myMethod") // compatible with static code
+ *         throw Error("no such method");
+ *     asynchronouslyObtainAResponse(requestData, function(err, responseData) {
+ *         callback(err, responseData);
+ *     });
+ * }
+ */
 
+/**
+ * Node-style callback as used by {@link RPCImpl}.
+ * @typedef RPCImplCallback
+ * @type {function}
+ * @param {Error|null} error Error, if any, otherwise `null`
+ * @param {Uint8Array|null} [response] Response data or `null` to signal end of stream, if there hasn't been an error
+ * @returns {undefined}
+ */
 
-/***/ }),
-
-/***/ 3474:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(8018)
-const encoder = __nccwpck_require__(6809)
-
-function in32Encode (val, buffer, dataView, offset) {
-  varint.encode(val < 0 ? val + 4294967296 : val, buffer, offset)
-  in32Encode.bytes = varint.encode.bytes
-}
-
-function int32Decode (buffer, dataView, offset) {
-  const val = varint.decode(buffer, offset)
-  int32Decode.bytes = varint.decode.bytes
-
-  return val > 2147483647 ? val - 4294967296 : val
-}
-
-function int32EncodingLength (val) {
-  return varint.encodingLength(val < 0 ? val + 4294967296 : val)
-}
-
-module.exports = encoder(0, in32Encode, int32Decode, int32EncodingLength)
+rpc.Service = __nccwpck_require__(2439);
 
 
 /***/ }),
 
-/***/ 152:
+/***/ 2439:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
+module.exports = Service;
 
-const varint = __nccwpck_require__(8018)
-const encoder = __nccwpck_require__(6809)
+var util = __nccwpck_require__(1241);
 
-function int64Encode (val, buffer, dataView, offset) {
-  if (val < 0) {
-    const last = offset + 9
-    varint.encode(val * -1, buffer, offset)
+// Extends EventEmitter
+(Service.prototype = Object.create(util.EventEmitter.prototype)).constructor = Service;
 
-    offset += varint.encode.bytes - 1
-    buffer[offset] = buffer[offset] | 0x80
+/**
+ * A service method callback as used by {@link rpc.ServiceMethod|ServiceMethod}.
+ *
+ * Differs from {@link RPCImplCallback} in that it is an actual callback of a service method which may not return `response = null`.
+ * @typedef rpc.ServiceMethodCallback
+ * @template TRes extends Message<TRes>
+ * @type {function}
+ * @param {Error|null} error Error, if any
+ * @param {TRes} [response] Response message
+ * @returns {undefined}
+ */
 
-    while (offset < last - 1) {
-      offset++
-      buffer[offset] = 0xff
-    }
-    buffer[last] = 0x01
+/**
+ * A service method part of a {@link rpc.Service} as created by {@link Service.create}.
+ * @typedef rpc.ServiceMethod
+ * @template TReq extends Message<TReq>
+ * @template TRes extends Message<TRes>
+ * @type {function}
+ * @param {TReq|Properties<TReq>} request Request message or plain object
+ * @param {rpc.ServiceMethodCallback<TRes>} [callback] Node-style callback called with the error, if any, and the response message
+ * @returns {Promise<Message<TRes>>} Promise if `callback` has been omitted, otherwise `undefined`
+ */
 
-    int64Encode.bytes = 10
-  } else {
-    varint.encode(val, buffer, offset)
-    int64Encode.bytes = varint.encode.bytes
-  }
+/**
+ * Constructs a new RPC service instance.
+ * @classdesc An RPC service as returned by {@link Service#create}.
+ * @exports rpc.Service
+ * @extends util.EventEmitter
+ * @constructor
+ * @param {RPCImpl} rpcImpl RPC implementation
+ * @param {boolean} [requestDelimited=false] Whether requests are length-delimited
+ * @param {boolean} [responseDelimited=false] Whether responses are length-delimited
+ */
+function Service(rpcImpl, requestDelimited, responseDelimited) {
+
+    if (typeof rpcImpl !== "function")
+        throw TypeError("rpcImpl must be a function");
+
+    util.EventEmitter.call(this);
+
+    /**
+     * RPC implementation. Becomes `null` once the service is ended.
+     * @type {RPCImpl|null}
+     */
+    this.rpcImpl = rpcImpl;
+
+    /**
+     * Whether requests are length-delimited.
+     * @type {boolean}
+     */
+    this.requestDelimited = Boolean(requestDelimited);
+
+    /**
+     * Whether responses are length-delimited.
+     * @type {boolean}
+     */
+    this.responseDelimited = Boolean(responseDelimited);
 }
 
-function int64Decode (buffer, dataView, offset) {
-  let val = varint.decode(buffer, offset)
-
-  if (val >= Math.pow(2, 63)) {
-    let limit = 9
-    while (buffer[offset + limit - 1] === 0xff) limit--
-    limit = limit || 9
-    const subset = buffer.subarray(offset, offset + limit)
-    subset[limit - 1] = subset[limit - 1] & 0x7f
-    val = -1 * varint.decode(subset, 0)
-    int64Decode.bytes = 10
-  } else {
-    int64Decode.bytes = varint.decode.bytes
-  }
-
-  return val
-}
-
-function int64EncodingLength (val) {
-  return val < 0 ? 10 : varint.encodingLength(val)
-}
-
-module.exports = encoder(0, int64Encode, int64Decode, int64EncodingLength)
-
-
-/***/ }),
-
-/***/ 6239:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encoder = __nccwpck_require__(6809)
-
-function sfixed32EncodingLength (val) {
-  return 4
-}
-
-function sfixed32Encode (val, buffer, dataView, offset) {
-  dataView.setInt32(offset, val, true)
-  sfixed32Encode.bytes = 4
-}
-
-function sfixed32Decode (buffer, dataView, offset) {
-  const val = dataView.getInt32(offset, true)
-  sfixed32Decode.bytes = 4
-
-  return val
-}
-
-module.exports = encoder(5, sfixed32Encode, sfixed32Decode, sfixed32EncodingLength)
-
-
-/***/ }),
-
-/***/ 5139:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const svarint = __nccwpck_require__(4579)
-const encoder = __nccwpck_require__(6809)
-
-function svarintEncode (val, buffer, dataView, offset) {
-  svarint.encode(val, buffer, offset)
-
-  svarintEncode.bytes = svarint.encode.bytes
-}
-
-function svarintDecode (buffer, dataView, offset) {
-  const val = svarint.decode(buffer, offset)
-  svarintDecode.bytes = svarint.decode.bytes
-
-  return val
-}
-
-module.exports = encoder(0, svarintEncode, svarintDecode, svarint.encodingLength)
-
-
-/***/ }),
-
-/***/ 1038:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(8018)
-const uint8ArrayFromString = __nccwpck_require__(4104)
-const uint8ArrayToString = __nccwpck_require__(5965)
-const encoder = __nccwpck_require__(6809)
-
-function stringEncodingLength (val) {
-  const len = uint8ArrayFromString(val).byteLength
-  return varint.encodingLength(len) + len
-}
-
-function stringEncode (val, buffer, dataView, offset) {
-  const oldOffset = offset
-  const len = uint8ArrayFromString(val).byteLength
-
-  varint.encode(len, buffer, offset, 'utf-8')
-  offset += varint.encode.bytes
-
-  const arr = uint8ArrayFromString(val)
-  buffer.set(arr, offset)
-  offset += arr.length
-
-  stringEncode.bytes = offset - oldOffset
-}
-
-function stringDecode (buffer, dataView, offset) {
-  const oldOffset = offset
-
-  const len = varint.decode(buffer, offset)
-  offset += varint.decode.bytes
-
-  const val = uint8ArrayToString(buffer.subarray(offset, offset + len))
-  offset += len
-
-  stringDecode.bytes = offset - oldOffset
-
-  return val
-}
-
-module.exports = encoder(2, stringEncode, stringDecode, stringEncodingLength)
-
-
-/***/ }),
-
-/***/ 3293:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const varint = __nccwpck_require__(8018)
-const encoder = __nccwpck_require__(6809)
-
-function varintEncode (val, buffer, dataView, offset) {
-  varint.encode(val, buffer, offset)
-
-  varintEncode.bytes = varint.encode.bytes
-}
-
-function varintDecode (buffer, dataView, offset) {
-  const val = varint.decode(buffer, offset)
-  varintDecode.bytes = varint.decode.bytes
-
-  return val
-}
-
-module.exports = encoder(0, varintEncode, varintDecode, varint.encodingLength)
-
-
-/***/ }),
-
-/***/ 3980:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-const encodings = __nccwpck_require__(8595)
-const compileDecode = __nccwpck_require__(3822)
-const compileEncode = __nccwpck_require__(5359)
-const compileEncodingLength = __nccwpck_require__(4316)
-const varint = __nccwpck_require__(8018)
-
-const flatten = function (values) {
-  if (!values) return null
-  const result = {}
-  Object.keys(values).forEach(function (k) {
-    result[k] = values[k].value
-  })
-  return result
-}
-
-module.exports = function (schema, extraEncodings) {
-  const messages = {}
-  const enums = {}
-  const cache = {}
-
-  const visit = function (schema, prefix) {
-    if (schema.enums) {
-      schema.enums.forEach(function (e) {
-        e.id = prefix + (prefix ? '.' : '') + e.name
-        enums[e.id] = e
-        visit(e, e.id)
-      })
-    }
-    if (schema.messages) {
-      schema.messages.forEach(function (m) {
-        m.id = prefix + (prefix ? '.' : '') + m.name
-        messages[m.id] = m
-        m.fields.forEach(function (f) {
-          if (!f.map) return
-
-          const name = 'Map_' + f.map.from + '_' + f.map.to
-          const map = {
-            name: name,
-            enums: [],
-            messages: [],
-            fields: [{
-              name: 'key',
-              type: f.map.from,
-              tag: 1,
-              repeated: false,
-              required: true
-            }, {
-              name: 'value',
-              type: f.map.to,
-              tag: 2,
-              repeated: false,
-              required: false
-            }],
-            extensions: null,
-            id: prefix + (prefix ? '.' : '') + name
-          }
-
-          if (!messages[map.id]) {
-            messages[map.id] = map
-            schema.messages.push(map)
-          }
-          f.type = name
-          f.repeated = true
-        })
-        visit(m, m.id)
-      })
-    }
-  }
-
-  visit(schema, '')
-
-  const compileEnum = function (e) {
-    const values = Object.keys(e.values || []).map(function (k) {
-      return parseInt(e.values[k].value, 10)
-    })
-
-    const encode = function enumEncode (val, buf, view, offset) {
-      if (!values.length || values.indexOf(val) === -1) {
-        throw new Error('Invalid enum value: ' + val)
-      }
-      varint.encode(val, buf, offset)
-      enumEncode.bytes = varint.encode.bytes
-      return buf
+/**
+ * Calls a service method through {@link rpc.Service#rpcImpl|rpcImpl}.
+ * @param {Method|rpc.ServiceMethod<TReq,TRes>} method Reflected or static method
+ * @param {Constructor<TReq>} requestCtor Request constructor
+ * @param {Constructor<TRes>} responseCtor Response constructor
+ * @param {TReq|Properties<TReq>} request Request message or plain object
+ * @param {rpc.ServiceMethodCallback<TRes>} callback Service callback
+ * @returns {undefined}
+ * @template TReq extends Message<TReq>
+ * @template TRes extends Message<TRes>
+ */
+Service.prototype.rpcCall = function rpcCall(method, requestCtor, responseCtor, request, callback) {
+
+    if (!request)
+        throw TypeError("request must be specified");
+
+    var self = this;
+    if (!callback)
+        return util.asPromise(rpcCall, self, method, requestCtor, responseCtor, request);
+
+    if (!self.rpcImpl) {
+        setTimeout(function() { callback(Error("already ended")); }, 0);
+        return undefined;
     }
 
-    const decode = function enumDecode (buf, view, offset) {
-      var val = varint.decode(buf, offset)
-      if (!values.length || values.indexOf(val) === -1) {
-        throw new Error('Invalid enum value: ' + val)
-      }
-      enumDecode.bytes = varint.decode.bytes
-      return val
+    try {
+        return self.rpcImpl(
+            method,
+            requestCtor[self.requestDelimited ? "encodeDelimited" : "encode"](request).finish(),
+            function rpcCallback(err, response) {
+
+                if (err) {
+                    self.emit("error", err, method);
+                    return callback(err);
+                }
+
+                if (response === null) {
+                    self.end(/* endedByRPC */ true);
+                    return undefined;
+                }
+
+                if (!(response instanceof responseCtor)) {
+                    try {
+                        response = responseCtor[self.responseDelimited ? "decodeDelimited" : "decode"](response);
+                    } catch (err) {
+                        self.emit("error", err, method);
+                        return callback(err);
+                    }
+                }
+
+                self.emit("data", response, method);
+                return callback(null, response);
+            }
+        );
+    } catch (err) {
+        self.emit("error", err, method);
+        setTimeout(function() { callback(err); }, 0);
+        return undefined;
     }
+};
 
-    return encodings.make(0, encode, decode, varint.encodingLength)
-  }
-
-  const compileMessage = function (m, exports) {
-    m.messages.forEach(function (nested) {
-      exports[nested.name] = resolve(nested.name, m.id)
-    })
-
-    m.enums.forEach(function (val) {
-      exports[val.name] = flatten(val.values)
-    })
-
-    exports.type = 2
-    exports.message = true
-    exports.name = m.name
-
-    const oneofs = {}
-
-    m.fields.forEach(function (f) {
-      if (!f.oneof) return
-      if (!oneofs[f.oneof]) oneofs[f.oneof] = []
-      oneofs[f.oneof].push(f.name)
-    })
-
-    const enc = m.fields.map(function (f) {
-      return resolve(f.type, m.id)
-    })
-
-    const encodingLength = compileEncodingLength(m, enc, oneofs)
-    const encode = compileEncode(m, resolve, enc, oneofs, encodingLength)
-    const decode = compileDecode(m, resolve, enc)
-
-    // end of compilation - return all the things
-
-    encode.bytes = decode.bytes = 0
-
-    exports.buffer = true
-    exports.encode = encode
-    exports.decode = decode
-    exports.encodingLength = encodingLength
-
-    return exports
-  }
-
-  const resolve = function (name, from, compile) {
-    if (extraEncodings && extraEncodings[name]) return extraEncodings[name]
-    if (encodings[name]) return encodings[name]
-
-    const m = (from ? from + '.' + name : name).split('.')
-      .map(function (part, i, list) {
-        return list.slice(0, i).concat(name).join('.')
-      })
-      .reverse()
-      .reduce(function (result, id) {
-        return result || messages[id] || enums[id]
-      }, null)
-
-    if (compile === false) return m
-    if (!m) throw new Error('Could not resolve ' + name)
-
-    if (m.values) return compileEnum(m)
-    const res = cache[m.id] || compileMessage(m, cache[m.id] = {})
-    return res
-  }
-
-  return (schema.enums || []).concat((schema.messages || []).map(function (message) {
-    return resolve(message.id)
-  }))
-}
+/**
+ * Ends this service and emits the `end` event.
+ * @param {boolean} [endedByRPC=false] Whether the service has been ended by the RPC implementation.
+ * @returns {rpc.Service} `this`
+ */
+Service.prototype.end = function end(endedByRPC) {
+    if (this.rpcImpl) {
+        if (!endedByRPC) // signal end to rpcImpl
+            this.rpcImpl(null, null, null);
+        this.rpcImpl = null;
+        this.emit("end").off();
+    }
+    return this;
+};
 
 
 /***/ }),
 
-/***/ 5693:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-
-exports.r = function (val) {
-  return val !== null && val !== undefined && (typeof val !== 'number' || !isNaN(val))
-}
-
-
-/***/ }),
-
-/***/ 9505:
+/***/ 8374:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
 
+module.exports = LongBits;
 
-var schema = __nccwpck_require__(8917)
-var compile = __nccwpck_require__(3980)
+var util = __nccwpck_require__(1241);
 
-var flatten = function (values) {
-  if (!values) return null
-  var result = {}
-  Object.keys(values).forEach(function (k) {
-    result[k] = values[k].value
-  })
-  return result
+/**
+ * Constructs new long bits.
+ * @classdesc Helper class for working with the low and high bits of a 64 bit value.
+ * @memberof util
+ * @constructor
+ * @param {number} lo Low 32 bits, unsigned
+ * @param {number} hi High 32 bits, unsigned
+ */
+function LongBits(lo, hi) {
+
+    // note that the casts below are theoretically unnecessary as of today, but older statically
+    // generated converter code might still call the ctor with signed 32bits. kept for compat.
+
+    /**
+     * Low bits.
+     * @type {number}
+     */
+    this.lo = lo >>> 0;
+
+    /**
+     * High bits.
+     * @type {number}
+     */
+    this.hi = hi >>> 0;
 }
 
-module.exports = function (proto, opts) {
-  if (!opts) opts = {}
-  if (!proto) throw new Error('Pass in a .proto string or a protobuf-schema parsed object')
+/**
+ * Zero bits.
+ * @memberof util.LongBits
+ * @type {util.LongBits}
+ */
+var zero = LongBits.zero = new LongBits(0, 0);
 
-  var sch = (typeof proto === 'object' && !(proto instanceof Uint8Array)) ? proto : schema.parse(proto)
+zero.toNumber = function() { return 0; };
+zero.zzEncode = zero.zzDecode = function() { return this; };
+zero.length = function() { return 1; };
 
-  // to not make toString,toJSON enumarable we make a fire-and-forget prototype
-  var Messages = function () {
-    var self = this
+/**
+ * Zero hash.
+ * @memberof util.LongBits
+ * @type {string}
+ */
+var zeroHash = LongBits.zeroHash = "\0\0\0\0\0\0\0\0";
 
-    compile(sch, opts.encodings || {}).forEach(function (m) {
-      self[m.name] = flatten(m.values) || m
-    })
-  }
+/**
+ * Constructs new long bits from the specified number.
+ * @param {number} value Value
+ * @returns {util.LongBits} Instance
+ */
+LongBits.fromNumber = function fromNumber(value) {
+    if (value === 0)
+        return zero;
+    var sign = value < 0;
+    if (sign)
+        value = -value;
+    var lo = value >>> 0,
+        hi = (value - lo) / 4294967296 >>> 0;
+    if (sign) {
+        hi = ~hi >>> 0;
+        lo = ~lo >>> 0;
+        if (++lo > 4294967295) {
+            lo = 0;
+            if (++hi > 4294967295)
+                hi = 0;
+        }
+    }
+    return new LongBits(lo, hi);
+};
 
-  Messages.prototype.toString = function () {
-    return schema.stringify(sch)
-  }
+/**
+ * Constructs new long bits from a number, long or string.
+ * @param {Long|number|string} value Value
+ * @returns {util.LongBits} Instance
+ */
+LongBits.from = function from(value) {
+    if (typeof value === "number")
+        return LongBits.fromNumber(value);
+    if (util.isString(value)) {
+        /* istanbul ignore else */
+        if (util.Long)
+            value = util.Long.fromString(value);
+        else
+            return LongBits.fromNumber(parseInt(value, 10));
+    }
+    return value.low || value.high ? new LongBits(value.low >>> 0, value.high >>> 0) : zero;
+};
 
-  Messages.prototype.toJSON = function () {
-    return sch
-  }
+/**
+ * Converts this long bits to a possibly unsafe JavaScript number.
+ * @param {boolean} [unsigned=false] Whether unsigned or not
+ * @returns {number} Possibly unsafe number
+ */
+LongBits.prototype.toNumber = function toNumber(unsigned) {
+    if (!unsigned && this.hi >>> 31) {
+        var lo = ~this.lo + 1 >>> 0,
+            hi = ~this.hi     >>> 0;
+        if (!lo)
+            hi = hi + 1 >>> 0;
+        return -(lo + hi * 4294967296);
+    }
+    return this.lo + this.hi * 4294967296;
+};
 
-  return new Messages()
+/**
+ * Converts this long bits to a long.
+ * @param {boolean} [unsigned=false] Whether unsigned or not
+ * @returns {Long} Long
+ */
+LongBits.prototype.toLong = function toLong(unsigned) {
+    return util.Long
+        ? new util.Long(this.lo | 0, this.hi | 0, Boolean(unsigned))
+        /* istanbul ignore next */
+        : { low: this.lo | 0, high: this.hi | 0, unsigned: Boolean(unsigned) };
+};
+
+var charCodeAt = String.prototype.charCodeAt;
+
+/**
+ * Constructs new long bits from the specified 8 characters long hash.
+ * @param {string} hash Hash
+ * @returns {util.LongBits} Bits
+ */
+LongBits.fromHash = function fromHash(hash) {
+    if (hash === zeroHash)
+        return zero;
+    return new LongBits(
+        ( charCodeAt.call(hash, 0)
+        | charCodeAt.call(hash, 1) << 8
+        | charCodeAt.call(hash, 2) << 16
+        | charCodeAt.call(hash, 3) << 24) >>> 0
+    ,
+        ( charCodeAt.call(hash, 4)
+        | charCodeAt.call(hash, 5) << 8
+        | charCodeAt.call(hash, 6) << 16
+        | charCodeAt.call(hash, 7) << 24) >>> 0
+    );
+};
+
+/**
+ * Converts this long bits to a 8 characters long hash.
+ * @returns {string} Hash
+ */
+LongBits.prototype.toHash = function toHash() {
+    return String.fromCharCode(
+        this.lo        & 255,
+        this.lo >>> 8  & 255,
+        this.lo >>> 16 & 255,
+        this.lo >>> 24      ,
+        this.hi        & 255,
+        this.hi >>> 8  & 255,
+        this.hi >>> 16 & 255,
+        this.hi >>> 24
+    );
+};
+
+/**
+ * Zig-zag encodes this long bits.
+ * @returns {util.LongBits} `this`
+ */
+LongBits.prototype.zzEncode = function zzEncode() {
+    var mask =   this.hi >> 31;
+    this.hi  = ((this.hi << 1 | this.lo >>> 31) ^ mask) >>> 0;
+    this.lo  = ( this.lo << 1                   ^ mask) >>> 0;
+    return this;
+};
+
+/**
+ * Zig-zag decodes this long bits.
+ * @returns {util.LongBits} `this`
+ */
+LongBits.prototype.zzDecode = function zzDecode() {
+    var mask = -(this.lo & 1);
+    this.lo  = ((this.lo >>> 1 | this.hi << 31) ^ mask) >>> 0;
+    this.hi  = ( this.hi >>> 1                  ^ mask) >>> 0;
+    return this;
+};
+
+/**
+ * Calculates the length of this longbits when encoded as a varint.
+ * @returns {number} Length
+ */
+LongBits.prototype.length = function length() {
+    var part0 =  this.lo,
+        part1 = (this.lo >>> 28 | this.hi << 4) >>> 0,
+        part2 =  this.hi >>> 24;
+    return part2 === 0
+         ? part1 === 0
+           ? part0 < 16384
+             ? part0 < 128 ? 1 : 2
+             : part0 < 2097152 ? 3 : 4
+           : part1 < 16384
+             ? part1 < 128 ? 5 : 6
+             : part1 < 2097152 ? 7 : 8
+         : part2 < 128 ? 9 : 10;
+};
+
+
+/***/ }),
+
+/***/ 1241:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var util = exports;
+
+// used to return a Promise where callback is omitted
+util.asPromise = __nccwpck_require__(252);
+
+// converts to / from base64 encoded strings
+util.base64 = __nccwpck_require__(6718);
+
+// base class of rpc.Service
+util.EventEmitter = __nccwpck_require__(6850);
+
+// float handling accross browsers
+util.float = __nccwpck_require__(1843);
+
+// requires modules optionally and hides the call from bundlers
+util.inquire = __nccwpck_require__(94);
+
+// converts to / from utf8 encoded strings
+util.utf8 = __nccwpck_require__(9049);
+
+// provides a node-like buffer pool in the browser
+util.pool = __nccwpck_require__(7743);
+
+// utility to work with the low and high bits of a 64 bit value
+util.LongBits = __nccwpck_require__(8374);
+
+/**
+ * Whether running within node or not.
+ * @memberof util
+ * @type {boolean}
+ */
+util.isNode = Boolean(typeof global !== "undefined"
+                   && global
+                   && global.process
+                   && global.process.versions
+                   && global.process.versions.node);
+
+/**
+ * Global object reference.
+ * @memberof util
+ * @type {Object}
+ */
+util.global = util.isNode && global
+           || typeof window !== "undefined" && window
+           || typeof self   !== "undefined" && self
+           || this; // eslint-disable-line no-invalid-this
+
+/**
+ * An immuable empty array.
+ * @memberof util
+ * @type {Array.<*>}
+ * @const
+ */
+util.emptyArray = Object.freeze ? Object.freeze([]) : /* istanbul ignore next */ []; // used on prototypes
+
+/**
+ * An immutable empty object.
+ * @type {Object}
+ * @const
+ */
+util.emptyObject = Object.freeze ? Object.freeze({}) : /* istanbul ignore next */ {}; // used on prototypes
+
+/**
+ * Tests if the specified value is an integer.
+ * @function
+ * @param {*} value Value to test
+ * @returns {boolean} `true` if the value is an integer
+ */
+util.isInteger = Number.isInteger || /* istanbul ignore next */ function isInteger(value) {
+    return typeof value === "number" && isFinite(value) && Math.floor(value) === value;
+};
+
+/**
+ * Tests if the specified value is a string.
+ * @param {*} value Value to test
+ * @returns {boolean} `true` if the value is a string
+ */
+util.isString = function isString(value) {
+    return typeof value === "string" || value instanceof String;
+};
+
+/**
+ * Tests if the specified value is a non-null object.
+ * @param {*} value Value to test
+ * @returns {boolean} `true` if the value is a non-null object
+ */
+util.isObject = function isObject(value) {
+    return value && typeof value === "object";
+};
+
+/**
+ * Checks if a property on a message is considered to be present.
+ * This is an alias of {@link util.isSet}.
+ * @function
+ * @param {Object} obj Plain object or message instance
+ * @param {string} prop Property name
+ * @returns {boolean} `true` if considered to be present, otherwise `false`
+ */
+util.isset =
+
+/**
+ * Checks if a property on a message is considered to be present.
+ * @param {Object} obj Plain object or message instance
+ * @param {string} prop Property name
+ * @returns {boolean} `true` if considered to be present, otherwise `false`
+ */
+util.isSet = function isSet(obj, prop) {
+    var value = obj[prop];
+    if (value != null && obj.hasOwnProperty(prop)) // eslint-disable-line eqeqeq, no-prototype-builtins
+        return typeof value !== "object" || (Array.isArray(value) ? value.length : Object.keys(value).length) > 0;
+    return false;
+};
+
+/**
+ * Any compatible Buffer instance.
+ * This is a minimal stand-alone definition of a Buffer instance. The actual type is that exported by node's typings.
+ * @interface Buffer
+ * @extends Uint8Array
+ */
+
+/**
+ * Node's Buffer class if available.
+ * @type {Constructor<Buffer>}
+ */
+util.Buffer = (function() {
+    try {
+        var Buffer = util.inquire("buffer").Buffer;
+        // refuse to use non-node buffers if not explicitly assigned (perf reasons):
+        return Buffer.prototype.utf8Write ? Buffer : /* istanbul ignore next */ null;
+    } catch (e) {
+        /* istanbul ignore next */
+        return null;
+    }
+})();
+
+// Internal alias of or polyfull for Buffer.from.
+util._Buffer_from = null;
+
+// Internal alias of or polyfill for Buffer.allocUnsafe.
+util._Buffer_allocUnsafe = null;
+
+/**
+ * Creates a new buffer of whatever type supported by the environment.
+ * @param {number|number[]} [sizeOrArray=0] Buffer size or number array
+ * @returns {Uint8Array|Buffer} Buffer
+ */
+util.newBuffer = function newBuffer(sizeOrArray) {
+    /* istanbul ignore next */
+    return typeof sizeOrArray === "number"
+        ? util.Buffer
+            ? util._Buffer_allocUnsafe(sizeOrArray)
+            : new util.Array(sizeOrArray)
+        : util.Buffer
+            ? util._Buffer_from(sizeOrArray)
+            : typeof Uint8Array === "undefined"
+                ? sizeOrArray
+                : new Uint8Array(sizeOrArray);
+};
+
+/**
+ * Array implementation used in the browser. `Uint8Array` if supported, otherwise `Array`.
+ * @type {Constructor<Uint8Array>}
+ */
+util.Array = typeof Uint8Array !== "undefined" ? Uint8Array /* istanbul ignore next */ : Array;
+
+/**
+ * Any compatible Long instance.
+ * This is a minimal stand-alone definition of a Long instance. The actual type is that exported by long.js.
+ * @interface Long
+ * @property {number} low Low bits
+ * @property {number} high High bits
+ * @property {boolean} unsigned Whether unsigned or not
+ */
+
+/**
+ * Long.js's Long class if available.
+ * @type {Constructor<Long>}
+ */
+util.Long = /* istanbul ignore next */ util.global.dcodeIO && /* istanbul ignore next */ util.global.dcodeIO.Long
+         || /* istanbul ignore next */ util.global.Long
+         || util.inquire("long");
+
+/**
+ * Regular expression used to verify 2 bit (`bool`) map keys.
+ * @type {RegExp}
+ * @const
+ */
+util.key2Re = /^true|false|0|1$/;
+
+/**
+ * Regular expression used to verify 32 bit (`int32` etc.) map keys.
+ * @type {RegExp}
+ * @const
+ */
+util.key32Re = /^-?(?:0|[1-9][0-9]*)$/;
+
+/**
+ * Regular expression used to verify 64 bit (`int64` etc.) map keys.
+ * @type {RegExp}
+ * @const
+ */
+util.key64Re = /^(?:[\\x00-\\xff]{8}|-?(?:0|[1-9][0-9]*))$/;
+
+/**
+ * Converts a number or long to an 8 characters long hash string.
+ * @param {Long|number} value Value to convert
+ * @returns {string} Hash
+ */
+util.longToHash = function longToHash(value) {
+    return value
+        ? util.LongBits.from(value).toHash()
+        : util.LongBits.zeroHash;
+};
+
+/**
+ * Converts an 8 characters long hash string to a long or number.
+ * @param {string} hash Hash
+ * @param {boolean} [unsigned=false] Whether unsigned or not
+ * @returns {Long|number} Original value
+ */
+util.longFromHash = function longFromHash(hash, unsigned) {
+    var bits = util.LongBits.fromHash(hash);
+    if (util.Long)
+        return util.Long.fromBits(bits.lo, bits.hi, unsigned);
+    return bits.toNumber(Boolean(unsigned));
+};
+
+/**
+ * Merges the properties of the source object into the destination object.
+ * @memberof util
+ * @param {Object.<string,*>} dst Destination object
+ * @param {Object.<string,*>} src Source object
+ * @param {boolean} [ifNotSet=false] Merges only if the key is not already set
+ * @returns {Object.<string,*>} Destination object
+ */
+function merge(dst, src, ifNotSet) { // used by converters
+    for (var keys = Object.keys(src), i = 0; i < keys.length; ++i)
+        if (dst[keys[i]] === undefined || !ifNotSet)
+            dst[keys[i]] = src[keys[i]];
+    return dst;
 }
+
+util.merge = merge;
+
+/**
+ * Converts the first character of a string to lower case.
+ * @param {string} str String to convert
+ * @returns {string} Converted string
+ */
+util.lcFirst = function lcFirst(str) {
+    return str.charAt(0).toLowerCase() + str.substring(1);
+};
+
+/**
+ * Creates a custom error constructor.
+ * @memberof util
+ * @param {string} name Error name
+ * @returns {Constructor<Error>} Custom error constructor
+ */
+function newError(name) {
+
+    function CustomError(message, properties) {
+
+        if (!(this instanceof CustomError))
+            return new CustomError(message, properties);
+
+        // Error.call(this, message);
+        // ^ just returns a new error instance because the ctor can be called as a function
+
+        Object.defineProperty(this, "message", { get: function() { return message; } });
+
+        /* istanbul ignore next */
+        if (Error.captureStackTrace) // node
+            Error.captureStackTrace(this, CustomError);
+        else
+            Object.defineProperty(this, "stack", { value: new Error().stack || "" });
+
+        if (properties)
+            merge(this, properties);
+    }
+
+    (CustomError.prototype = Object.create(Error.prototype)).constructor = CustomError;
+
+    Object.defineProperty(CustomError.prototype, "name", { get: function() { return name; } });
+
+    CustomError.prototype.toString = function toString() {
+        return this.name + ": " + this.message;
+    };
+
+    return CustomError;
+}
+
+util.newError = newError;
+
+/**
+ * Constructs a new protocol error.
+ * @classdesc Error subclass indicating a protocol specifc error.
+ * @memberof util
+ * @extends Error
+ * @template T extends Message<T>
+ * @constructor
+ * @param {string} message Error message
+ * @param {Object.<string,*>} [properties] Additional properties
+ * @example
+ * try {
+ *     MyMessage.decode(someBuffer); // throws if required fields are missing
+ * } catch (e) {
+ *     if (e instanceof ProtocolError && e.instance)
+ *         console.log("decoded so far: " + JSON.stringify(e.instance));
+ * }
+ */
+util.ProtocolError = newError("ProtocolError");
+
+/**
+ * So far decoded message instance.
+ * @name util.ProtocolError#instance
+ * @type {Message<T>}
+ */
+
+/**
+ * A OneOf getter as returned by {@link util.oneOfGetter}.
+ * @typedef OneOfGetter
+ * @type {function}
+ * @returns {string|undefined} Set field name, if any
+ */
+
+/**
+ * Builds a getter for a oneof's present field name.
+ * @param {string[]} fieldNames Field names
+ * @returns {OneOfGetter} Unbound getter
+ */
+util.oneOfGetter = function getOneOf(fieldNames) {
+    var fieldMap = {};
+    for (var i = 0; i < fieldNames.length; ++i)
+        fieldMap[fieldNames[i]] = 1;
+
+    /**
+     * @returns {string|undefined} Set field name, if any
+     * @this Object
+     * @ignore
+     */
+    return function() { // eslint-disable-line consistent-return
+        for (var keys = Object.keys(this), i = keys.length - 1; i > -1; --i)
+            if (fieldMap[keys[i]] === 1 && this[keys[i]] !== undefined && this[keys[i]] !== null)
+                return keys[i];
+    };
+};
+
+/**
+ * A OneOf setter as returned by {@link util.oneOfSetter}.
+ * @typedef OneOfSetter
+ * @type {function}
+ * @param {string|undefined} value Field name
+ * @returns {undefined}
+ */
+
+/**
+ * Builds a setter for a oneof's present field name.
+ * @param {string[]} fieldNames Field names
+ * @returns {OneOfSetter} Unbound setter
+ */
+util.oneOfSetter = function setOneOf(fieldNames) {
+
+    /**
+     * @param {string} name Field name
+     * @returns {undefined}
+     * @this Object
+     * @ignore
+     */
+    return function(name) {
+        for (var i = 0; i < fieldNames.length; ++i)
+            if (fieldNames[i] !== name)
+                delete this[fieldNames[i]];
+    };
+};
+
+/**
+ * Default conversion options used for {@link Message#toJSON} implementations.
+ *
+ * These options are close to proto3's JSON mapping with the exception that internal types like Any are handled just like messages. More precisely:
+ *
+ * - Longs become strings
+ * - Enums become string keys
+ * - Bytes become base64 encoded strings
+ * - (Sub-)Messages become plain objects
+ * - Maps become plain objects with all string keys
+ * - Repeated fields become arrays
+ * - NaN and Infinity for float and double fields become strings
+ *
+ * @type {IConversionOptions}
+ * @see https://developers.google.com/protocol-buffers/docs/proto3?hl=en#json
+ */
+util.toJSONOptions = {
+    longs: String,
+    enums: String,
+    bytes: String,
+    json: true
+};
+
+// Sets up buffer utility according to the environment (called in index-minimal)
+util._configure = function() {
+    var Buffer = util.Buffer;
+    /* istanbul ignore if */
+    if (!Buffer) {
+        util._Buffer_from = util._Buffer_allocUnsafe = null;
+        return;
+    }
+    // because node 4.x buffers are incompatible & immutable
+    // see: https://github.com/dcodeIO/protobuf.js/pull/665
+    util._Buffer_from = Buffer.from !== Uint8Array.from && Buffer.from ||
+        /* istanbul ignore next */
+        function Buffer_from(value, encoding) {
+            return new Buffer(value, encoding);
+        };
+    util._Buffer_allocUnsafe = Buffer.allocUnsafe ||
+        /* istanbul ignore next */
+        function Buffer_allocUnsafe(size) {
+            return new Buffer(size);
+        };
+};
+
+
+/***/ }),
+
+/***/ 3098:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+module.exports = Writer;
+
+var util      = __nccwpck_require__(1241);
+
+var BufferWriter; // cyclic
+
+var LongBits  = util.LongBits,
+    base64    = util.base64,
+    utf8      = util.utf8;
+
+/**
+ * Constructs a new writer operation instance.
+ * @classdesc Scheduled writer operation.
+ * @constructor
+ * @param {function(*, Uint8Array, number)} fn Function to call
+ * @param {number} len Value byte length
+ * @param {*} val Value to write
+ * @ignore
+ */
+function Op(fn, len, val) {
+
+    /**
+     * Function to call.
+     * @type {function(Uint8Array, number, *)}
+     */
+    this.fn = fn;
+
+    /**
+     * Value byte length.
+     * @type {number}
+     */
+    this.len = len;
+
+    /**
+     * Next operation.
+     * @type {Writer.Op|undefined}
+     */
+    this.next = undefined;
+
+    /**
+     * Value to write.
+     * @type {*}
+     */
+    this.val = val; // type varies
+}
+
+/* istanbul ignore next */
+function noop() {} // eslint-disable-line no-empty-function
+
+/**
+ * Constructs a new writer state instance.
+ * @classdesc Copied writer state.
+ * @memberof Writer
+ * @constructor
+ * @param {Writer} writer Writer to copy state from
+ * @ignore
+ */
+function State(writer) {
+
+    /**
+     * Current head.
+     * @type {Writer.Op}
+     */
+    this.head = writer.head;
+
+    /**
+     * Current tail.
+     * @type {Writer.Op}
+     */
+    this.tail = writer.tail;
+
+    /**
+     * Current buffer length.
+     * @type {number}
+     */
+    this.len = writer.len;
+
+    /**
+     * Next state.
+     * @type {State|null}
+     */
+    this.next = writer.states;
+}
+
+/**
+ * Constructs a new writer instance.
+ * @classdesc Wire format writer using `Uint8Array` if available, otherwise `Array`.
+ * @constructor
+ */
+function Writer() {
+
+    /**
+     * Current length.
+     * @type {number}
+     */
+    this.len = 0;
+
+    /**
+     * Operations head.
+     * @type {Object}
+     */
+    this.head = new Op(noop, 0, 0);
+
+    /**
+     * Operations tail
+     * @type {Object}
+     */
+    this.tail = this.head;
+
+    /**
+     * Linked forked states.
+     * @type {Object|null}
+     */
+    this.states = null;
+
+    // When a value is written, the writer calculates its byte length and puts it into a linked
+    // list of operations to perform when finish() is called. This both allows us to allocate
+    // buffers of the exact required size and reduces the amount of work we have to do compared
+    // to first calculating over objects and then encoding over objects. In our case, the encoding
+    // part is just a linked list walk calling operations with already prepared values.
+}
+
+var create = function create() {
+    return util.Buffer
+        ? function create_buffer_setup() {
+            return (Writer.create = function create_buffer() {
+                return new BufferWriter();
+            })();
+        }
+        /* istanbul ignore next */
+        : function create_array() {
+            return new Writer();
+        };
+};
+
+/**
+ * Creates a new writer.
+ * @function
+ * @returns {BufferWriter|Writer} A {@link BufferWriter} when Buffers are supported, otherwise a {@link Writer}
+ */
+Writer.create = create();
+
+/**
+ * Allocates a buffer of the specified size.
+ * @param {number} size Buffer size
+ * @returns {Uint8Array} Buffer
+ */
+Writer.alloc = function alloc(size) {
+    return new util.Array(size);
+};
+
+// Use Uint8Array buffer pool in the browser, just like node does with buffers
+/* istanbul ignore else */
+if (util.Array !== Array)
+    Writer.alloc = util.pool(Writer.alloc, util.Array.prototype.subarray);
+
+/**
+ * Pushes a new operation to the queue.
+ * @param {function(Uint8Array, number, *)} fn Function to call
+ * @param {number} len Value byte length
+ * @param {number} val Value to write
+ * @returns {Writer} `this`
+ * @private
+ */
+Writer.prototype._push = function push(fn, len, val) {
+    this.tail = this.tail.next = new Op(fn, len, val);
+    this.len += len;
+    return this;
+};
+
+function writeByte(val, buf, pos) {
+    buf[pos] = val & 255;
+}
+
+function writeVarint32(val, buf, pos) {
+    while (val > 127) {
+        buf[pos++] = val & 127 | 128;
+        val >>>= 7;
+    }
+    buf[pos] = val;
+}
+
+/**
+ * Constructs a new varint writer operation instance.
+ * @classdesc Scheduled varint writer operation.
+ * @extends Op
+ * @constructor
+ * @param {number} len Value byte length
+ * @param {number} val Value to write
+ * @ignore
+ */
+function VarintOp(len, val) {
+    this.len = len;
+    this.next = undefined;
+    this.val = val;
+}
+
+VarintOp.prototype = Object.create(Op.prototype);
+VarintOp.prototype.fn = writeVarint32;
+
+/**
+ * Writes an unsigned 32 bit value as a varint.
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.uint32 = function write_uint32(value) {
+    // here, the call to this.push has been inlined and a varint specific Op subclass is used.
+    // uint32 is by far the most frequently used operation and benefits significantly from this.
+    this.len += (this.tail = this.tail.next = new VarintOp(
+        (value = value >>> 0)
+                < 128       ? 1
+        : value < 16384     ? 2
+        : value < 2097152   ? 3
+        : value < 268435456 ? 4
+        :                     5,
+    value)).len;
+    return this;
+};
+
+/**
+ * Writes a signed 32 bit value as a varint.
+ * @function
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.int32 = function write_int32(value) {
+    return value < 0
+        ? this._push(writeVarint64, 10, LongBits.fromNumber(value)) // 10 bytes per spec
+        : this.uint32(value);
+};
+
+/**
+ * Writes a 32 bit value as a varint, zig-zag encoded.
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.sint32 = function write_sint32(value) {
+    return this.uint32((value << 1 ^ value >> 31) >>> 0);
+};
+
+function writeVarint64(val, buf, pos) {
+    while (val.hi) {
+        buf[pos++] = val.lo & 127 | 128;
+        val.lo = (val.lo >>> 7 | val.hi << 25) >>> 0;
+        val.hi >>>= 7;
+    }
+    while (val.lo > 127) {
+        buf[pos++] = val.lo & 127 | 128;
+        val.lo = val.lo >>> 7;
+    }
+    buf[pos++] = val.lo;
+}
+
+/**
+ * Writes an unsigned 64 bit value as a varint.
+ * @param {Long|number|string} value Value to write
+ * @returns {Writer} `this`
+ * @throws {TypeError} If `value` is a string and no long library is present.
+ */
+Writer.prototype.uint64 = function write_uint64(value) {
+    var bits = LongBits.from(value);
+    return this._push(writeVarint64, bits.length(), bits);
+};
+
+/**
+ * Writes a signed 64 bit value as a varint.
+ * @function
+ * @param {Long|number|string} value Value to write
+ * @returns {Writer} `this`
+ * @throws {TypeError} If `value` is a string and no long library is present.
+ */
+Writer.prototype.int64 = Writer.prototype.uint64;
+
+/**
+ * Writes a signed 64 bit value as a varint, zig-zag encoded.
+ * @param {Long|number|string} value Value to write
+ * @returns {Writer} `this`
+ * @throws {TypeError} If `value` is a string and no long library is present.
+ */
+Writer.prototype.sint64 = function write_sint64(value) {
+    var bits = LongBits.from(value).zzEncode();
+    return this._push(writeVarint64, bits.length(), bits);
+};
+
+/**
+ * Writes a boolish value as a varint.
+ * @param {boolean} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.bool = function write_bool(value) {
+    return this._push(writeByte, 1, value ? 1 : 0);
+};
+
+function writeFixed32(val, buf, pos) {
+    buf[pos    ] =  val         & 255;
+    buf[pos + 1] =  val >>> 8   & 255;
+    buf[pos + 2] =  val >>> 16  & 255;
+    buf[pos + 3] =  val >>> 24;
+}
+
+/**
+ * Writes an unsigned 32 bit value as fixed 32 bits.
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.fixed32 = function write_fixed32(value) {
+    return this._push(writeFixed32, 4, value >>> 0);
+};
+
+/**
+ * Writes a signed 32 bit value as fixed 32 bits.
+ * @function
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.sfixed32 = Writer.prototype.fixed32;
+
+/**
+ * Writes an unsigned 64 bit value as fixed 64 bits.
+ * @param {Long|number|string} value Value to write
+ * @returns {Writer} `this`
+ * @throws {TypeError} If `value` is a string and no long library is present.
+ */
+Writer.prototype.fixed64 = function write_fixed64(value) {
+    var bits = LongBits.from(value);
+    return this._push(writeFixed32, 4, bits.lo)._push(writeFixed32, 4, bits.hi);
+};
+
+/**
+ * Writes a signed 64 bit value as fixed 64 bits.
+ * @function
+ * @param {Long|number|string} value Value to write
+ * @returns {Writer} `this`
+ * @throws {TypeError} If `value` is a string and no long library is present.
+ */
+Writer.prototype.sfixed64 = Writer.prototype.fixed64;
+
+/**
+ * Writes a float (32 bit).
+ * @function
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.float = function write_float(value) {
+    return this._push(util.float.writeFloatLE, 4, value);
+};
+
+/**
+ * Writes a double (64 bit float).
+ * @function
+ * @param {number} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.double = function write_double(value) {
+    return this._push(util.float.writeDoubleLE, 8, value);
+};
+
+var writeBytes = util.Array.prototype.set
+    ? function writeBytes_set(val, buf, pos) {
+        buf.set(val, pos); // also works for plain array values
+    }
+    /* istanbul ignore next */
+    : function writeBytes_for(val, buf, pos) {
+        for (var i = 0; i < val.length; ++i)
+            buf[pos + i] = val[i];
+    };
+
+/**
+ * Writes a sequence of bytes.
+ * @param {Uint8Array|string} value Buffer or base64 encoded string to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.bytes = function write_bytes(value) {
+    var len = value.length >>> 0;
+    if (!len)
+        return this._push(writeByte, 1, 0);
+    if (util.isString(value)) {
+        var buf = Writer.alloc(len = base64.length(value));
+        base64.decode(value, buf, 0);
+        value = buf;
+    }
+    return this.uint32(len)._push(writeBytes, len, value);
+};
+
+/**
+ * Writes a string.
+ * @param {string} value Value to write
+ * @returns {Writer} `this`
+ */
+Writer.prototype.string = function write_string(value) {
+    var len = utf8.length(value);
+    return len
+        ? this.uint32(len)._push(utf8.write, len, value)
+        : this._push(writeByte, 1, 0);
+};
+
+/**
+ * Forks this writer's state by pushing it to a stack.
+ * Calling {@link Writer#reset|reset} or {@link Writer#ldelim|ldelim} resets the writer to the previous state.
+ * @returns {Writer} `this`
+ */
+Writer.prototype.fork = function fork() {
+    this.states = new State(this);
+    this.head = this.tail = new Op(noop, 0, 0);
+    this.len = 0;
+    return this;
+};
+
+/**
+ * Resets this instance to the last state.
+ * @returns {Writer} `this`
+ */
+Writer.prototype.reset = function reset() {
+    if (this.states) {
+        this.head   = this.states.head;
+        this.tail   = this.states.tail;
+        this.len    = this.states.len;
+        this.states = this.states.next;
+    } else {
+        this.head = this.tail = new Op(noop, 0, 0);
+        this.len  = 0;
+    }
+    return this;
+};
+
+/**
+ * Resets to the last state and appends the fork state's current write length as a varint followed by its operations.
+ * @returns {Writer} `this`
+ */
+Writer.prototype.ldelim = function ldelim() {
+    var head = this.head,
+        tail = this.tail,
+        len  = this.len;
+    this.reset().uint32(len);
+    if (len) {
+        this.tail.next = head.next; // skip noop
+        this.tail = tail;
+        this.len += len;
+    }
+    return this;
+};
+
+/**
+ * Finishes the write operation.
+ * @returns {Uint8Array} Finished buffer
+ */
+Writer.prototype.finish = function finish() {
+    var head = this.head.next, // skip noop
+        buf  = this.constructor.alloc(this.len),
+        pos  = 0;
+    while (head) {
+        head.fn(head.val, buf, pos);
+        pos += head.len;
+        head = head.next;
+    }
+    // this.head = this.tail = null;
+    return buf;
+};
+
+Writer._configure = function(BufferWriter_) {
+    BufferWriter = BufferWriter_;
+    Writer.create = create();
+    BufferWriter._configure();
+};
+
+
+/***/ }),
+
+/***/ 1863:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+module.exports = BufferWriter;
+
+// extends Writer
+var Writer = __nccwpck_require__(3098);
+(BufferWriter.prototype = Object.create(Writer.prototype)).constructor = BufferWriter;
+
+var util = __nccwpck_require__(1241);
+
+/**
+ * Constructs a new buffer writer instance.
+ * @classdesc Wire format writer using node buffers.
+ * @extends Writer
+ * @constructor
+ */
+function BufferWriter() {
+    Writer.call(this);
+}
+
+BufferWriter._configure = function () {
+    /**
+     * Allocates a buffer of the specified size.
+     * @function
+     * @param {number} size Buffer size
+     * @returns {Buffer} Buffer
+     */
+    BufferWriter.alloc = util._Buffer_allocUnsafe;
+
+    BufferWriter.writeBytesBuffer = util.Buffer && util.Buffer.prototype instanceof Uint8Array && util.Buffer.prototype.set.name === "set"
+        ? function writeBytesBuffer_set(val, buf, pos) {
+          buf.set(val, pos); // faster than copy (requires node >= 4 where Buffers extend Uint8Array and set is properly inherited)
+          // also works for plain array values
+        }
+        /* istanbul ignore next */
+        : function writeBytesBuffer_copy(val, buf, pos) {
+          if (val.copy) // Buffer values
+            val.copy(buf, pos, 0, val.length);
+          else for (var i = 0; i < val.length;) // plain array values
+            buf[pos++] = val[i++];
+        };
+};
+
+
+/**
+ * @override
+ */
+BufferWriter.prototype.bytes = function write_bytes_buffer(value) {
+    if (util.isString(value))
+        value = util._Buffer_from(value, "base64");
+    var len = value.length >>> 0;
+    this.uint32(len);
+    if (len)
+        this._push(BufferWriter.writeBytesBuffer, len, value);
+    return this;
+};
+
+function writeStringBuffer(val, buf, pos) {
+    if (val.length < 40) // plain js is faster for short strings (probably due to redundant assertions)
+        util.utf8.write(val, buf, pos);
+    else if (buf.utf8Write)
+        buf.utf8Write(val, pos);
+    else
+        buf.write(val, pos);
+}
+
+/**
+ * @override
+ */
+BufferWriter.prototype.string = function write_string_buffer(value) {
+    var len = util.Buffer.byteLength(value);
+    this.uint32(len);
+    if (len)
+        this._push(writeStringBuffer, len, value);
+    return this;
+};
+
+
+/**
+ * Finishes the write operation.
+ * @name BufferWriter#finish
+ * @function
+ * @returns {Buffer} Finished buffer
+ */
+
+BufferWriter._configure();
 
 
 /***/ }),
@@ -42467,29 +38979,6 @@ if (!safer.constants) {
 }
 
 module.exports = safer
-
-
-/***/ }),
-
-/***/ 4579:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-var varint = __nccwpck_require__(8018)
-exports.encode = function encode (v, b, o) {
-  v = v >= 0 ? v*2 : v*-2 - 1
-  var r = varint.encode(v, b, o)
-  encode.bytes = varint.encode.bytes
-  return r
-}
-exports.decode = function decode (b, o) {
-  var v = varint.decode(b, o)
-  decode.bytes = varint.decode.bytes
-  return v & 1 ? (v+1) / -2 : v / 2
-}
-
-exports.encodingLength = function (v) {
-  return varint.encodingLength(v >= 0 ? v*2 : v*-2 - 1)
-}
 
 
 /***/ }),
@@ -42639,6 +39128,45 @@ module.exports = readable => {
 
 /***/ }),
 
+/***/ 6399:
+/***/ ((module) => {
+
+"use strict";
+
+
+/**
+ * Can be used with Array.sort to sort and array with Uint8Array entries
+ *
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ */
+function compare (a, b) {
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] < b[i]) {
+      return -1
+    }
+
+    if (a[i] > b[i]) {
+      return 1
+    }
+  }
+
+  if (a.byteLength > b.byteLength) {
+    return 1
+  }
+
+  if (a.byteLength < b.byteLength) {
+    return -1
+  }
+
+  return 0
+}
+
+module.exports = compare
+
+
+/***/ }),
+
 /***/ 7952:
 /***/ ((module) => {
 
@@ -42714,11 +39242,10 @@ module.exports = equals
 
 
 const { encoding: getCodec } = __nccwpck_require__(8959)
-const { TextEncoder } = __nccwpck_require__(2287)
 const utf8Encoder = new TextEncoder()
 
 /**
- * @typedef {import('multibase/src/types').BaseName} BaseName
+ * @typedef {import('multibase/src/types').BaseName | 'utf8' | 'utf-8' | 'ascii' | undefined} SupportedEncodings
  */
 
 /**
@@ -42745,7 +39272,7 @@ function asciiStringToUint8Array (string) {
  * Also `ascii` which is similar to node's 'binary' encoding.
  *
  * @param {string} string
- * @param {BaseName | 'utf8' | 'utf-8' | 'ascii'} [encoding=utf8] - utf8, base16, base64, base64urlpad, etc
+ * @param {SupportedEncodings} [encoding=utf8] - utf8, base16, base64, base64urlpad, etc
  * @returns {Uint8Array}
  */
 function fromString (string, encoding = 'utf8') {
@@ -42772,11 +39299,10 @@ module.exports = fromString
 
 
 const { encoding: getCodec } = __nccwpck_require__(8959)
-const { TextDecoder } = __nccwpck_require__(2287)
 const utf8Decoder = new TextDecoder('utf8')
 
 /**
- * @typedef {import('multibase/src/types').BaseName} BaseName
+ * @typedef {import('multibase/src/types').BaseName | 'utf8' | 'utf-8' | 'ascii' | undefined} SupportedEncodings
  */
 
 /**
@@ -42802,7 +39328,7 @@ function uint8ArrayToAsciiString (array) {
  * Also `ascii` which is similar to node's 'binary' encoding.
  *
  * @param {Uint8Array} array - The array to turn into a string
- * @param {BaseName | 'utf8' | 'utf-8' | 'ascii'} [encoding=utf8] - The encoding to use
+ * @param {SupportedEncodings} [encoding=utf8] - The encoding to use
  * @returns {string}
  */
 function toString (array, encoding = 'utf8') {
@@ -42818,38 +39344,6 @@ function toString (array, encoding = 'utf8') {
 }
 
 module.exports = toString
-
-
-/***/ }),
-
-/***/ 9046:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-
-exports.fromCallback = function (fn) {
-  return Object.defineProperty(function (...args) {
-    if (typeof args[args.length - 1] === 'function') fn.apply(this, args)
-    else {
-      return new Promise((resolve, reject) => {
-        fn.call(
-          this,
-          ...args,
-          (err, res) => (err != null) ? reject(err) : resolve(res)
-        )
-      })
-    }
-  }, 'name', { value: fn.name })
-}
-
-exports.fromPromise = function (fn) {
-  return Object.defineProperty(function (...args) {
-    const cb = args[args.length - 1]
-    if (typeof cb !== 'function') return fn.apply(this, args)
-    else fn.apply(this, args.slice(0, -1)).then(r => cb(null, r), cb)
-  }, 'name', { value: fn.name })
-}
 
 
 /***/ }),
@@ -43083,21 +39577,6 @@ module.exports = { urlAlphabet }
 
 /***/ }),
 
-/***/ 2287:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-exports.TextEncoder =
-  typeof TextEncoder !== "undefined" ? TextEncoder : __nccwpck_require__(1669).TextEncoder
-
-exports.TextDecoder =
-  typeof TextDecoder !== "undefined" ? TextDecoder : __nccwpck_require__(1669).TextDecoder
-
-
-/***/ }),
-
 /***/ 3612:
 /***/ ((module) => {
 
@@ -43170,14 +39649,6 @@ module.exports = JSON.parse("{\"name\":\"ipld-block\",\"version\":\"0.11.1\",\"d
 
 /***/ }),
 
-/***/ 2357:
-/***/ ((module) => {
-
-"use strict";
-module.exports = require("assert");;
-
-/***/ }),
-
 /***/ 3407:
 /***/ ((module) => {
 
@@ -43210,7 +39681,7 @@ module.exports = require("fs");;
 
 /***/ }),
 
-/***/ 5876:
+/***/ 8605:
 /***/ ((module) => {
 
 "use strict";
@@ -43282,7 +39753,7 @@ module.exports = require("util");;
 
 /***/ }),
 
-/***/ 1903:
+/***/ 8761:
 /***/ ((module) => {
 
 "use strict";
