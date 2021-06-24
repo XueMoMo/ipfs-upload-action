@@ -1,6 +1,6 @@
-name: 'Crust IPFS Upload'
+name: 'Up-To-IPFS-Use-Crust'
 description: 'Upload your site to crustwebsites.net/ gateway'
-author: 'crust'
+author: 'Eericxu'
 branding:
   icon: 'upload'
   color: 'gray-dark'
@@ -12,9 +12,16 @@ inputs:
   crust-secret-key:
     description: 'Crustwebsites gateway secret key'
     required: true
+  ipns-key:
+    description: 'ipns-key is (ipfs key gen <ipns-key>)'
+    default: ''
+    required: false
+
 outputs:
   hash:
     description: 'Uploaded IPFS cid(CIDv0) hash value'
+  ipns:
+    description: 'ipns id'
 
 runs:
   using: 'node12'

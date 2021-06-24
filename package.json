@@ -1,10 +1,9 @@
 {
   "name": "ipfs-upload-action",
-  "version": "1.0.2",
+  "version": "1.0.0",
   "description": "Upload a static website to crustwebsites.net public IPFS gateway",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "ncc build index.js"
   },
   "repository": {
@@ -25,6 +24,6 @@
   "dependencies": {
     "@actions/core": "^1.2.6",
     "@vercel/ncc": "^0.27.0",
-    "ipfs-http-client": "^49.0.2"
+    "ipfs-http-client": "^50.1.2"
   }
 }

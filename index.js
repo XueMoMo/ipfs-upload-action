@@ -21,7 +21,7 @@ async function main() {
     }
 
     // 3. Create ipfs http client
-    const ipfs = IpfsHttpClient({
+    const ipfs = IpfsHttpClient.create({
         url: ipfsGateway,
         headers: {
             authorization: 'Basic ' + crustSecretKey
@@ -34,6 +34,19 @@ async function main() {
         core.setOutput('hash', cid.toV0().toString());
     } else {
         throw new Error('IPFS add failed, please try again.');
+    }
+
+    // 4. Publish to IPNS
+    const ipnsKey = core.getInput('ipns-key')
+    if(cid && ipnsKey){
+        const keys = await ipfs.key.list()
+        if(!keys.find(item => item.name === ipnsKey)){
+            await ipfs.key.gen(ipnsKey)
+        }
+        const res = await ipfs.name.publish(`/ipfs/${cid}`, {
+            key: ipnsKey
+        })
+        core.setOutput('ipns', res.name)
     }
 }
 
